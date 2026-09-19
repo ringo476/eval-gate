@@ -1,0 +1,62 @@
+name: Eval Gate
+
+# This is the workflow that actually costs money (real Claude calls), so
+# it is NOT wired to run on every push -- that would be an unbounded,
+# unreviewed spend trigger on every commit, including from forks. Real
+# teams run this on a schedule (nightly) and/or manually before a
+# release, never on every PR, for exactly this reason.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model under test"
+        default: "claude-haiku-4-5-20251001"
+        required: false
+      min_score:
+        description: "Minimum mean score required to pass"
+        default: "0.75"
+        required: false
+  schedule:
+    - cron: "0 6 * * *"  # nightly at 06:00 UTC
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    environment: eval  # requires manual environment approval + the secret below
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Vendor target app
+        run: bash scripts/setup_target.sh
+
+      - name: Run golden set
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HARNESS_MAX_COST_USD: "3.00"
+        run: >
+          python -m harness.cli run
+          --provider anthropic
+          --model "${{ github.event.inputs.model || 'claude-haiku-4-5-20251001' }}"
+
+      - name: Gate on quality bar
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: >
+          python -m harness.cli gate
+          --model "${{ github.event.inputs.model || 'claude-haiku-4-5-20251001' }}"
+          --min-score "${{ github.event.inputs.min_score || '0.75' }}"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: reports/*.md

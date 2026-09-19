@@ -1,0 +1,16 @@
+[project]
+name = "ai-model-harness"
+version = "0.1.0"
+description = "Provider-agnostic eval harness for LLM-powered apps, with judge calibration, regression gating, and cost/budget controls."
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

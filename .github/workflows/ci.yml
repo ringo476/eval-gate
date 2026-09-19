@@ -1,0 +1,36 @@
+name: CI
+
+# Runs on every push/PR. Free -- uses --provider mock throughout, so this
+# workflow never needs an API key and never spends money. It proves the
+# harness's own code is correct; it does NOT tell you anything about the
+# target app's answer quality. That's what eval-gate.yml is for.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check harness tests
+
+      - name: Unit tests (mock provider, no API key needed)
+        run: pytest -q
+
+      - name: Vendor target app
+        run: bash scripts/setup_target.sh
+
+      - name: Smoke run against real pipeline (mock model, $0)
+        run: python -m harness.cli run --provider mock --smoke 5

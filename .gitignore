@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+runs.db
+cache.db
+.harness_cache.db
+reports/*.md
+reports/*.json
+!reports/.gitkeep
+targets/
