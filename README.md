@@ -161,9 +161,9 @@ python -m harness.cli calibrate --provider anthropic
 
 | Role | Model | Why |
 |---|---|---|
-| Cheap task model | `claude-haiku-4-5-20251001` | Fast/cheap tier, default for iteration |
-| Capable task model | `claude-sonnet-5` | Comparison point -- the whole exercise is measuring the Haiku/Sonnet tradeoff on identical inputs |
-| Judge | `claude-sonnet-5` | Stronger than the cheap tier being graded; calibrated in [CALIBRATION.md](CALIBRATION.md) rather than trusted blindly |
+| Task model (default) | `claude-haiku-4-5-20251001` | Cheapest viable tier -- used for both iteration and the actual run by default |
+| Task model (optional comparison) | `claude-sonnet-5` | Only added once Haiku's results are in hand, to measure the Haiku/Sonnet tradeoff on identical inputs -- not required to use this project |
+| Judge (default) | `claude-haiku-4-5-20251001` | Cheapest option, same tier as the task model. This is *not* trusted blindly -- see [CALIBRATION.md](CALIBRATION.md): run `harness calibrate` and check the MAE/correlation before relying on it for gating. Bump to `claude-sonnet-5` only if calibration shows Haiku isn't good enough, and only for the judge role. |
 | Embeddings | `all-MiniLM-L6-v2` (local, via sentence-transformers) | Free, no API cost, run as many similarity checks as needed |
 
 ## Cost controls
@@ -182,9 +182,9 @@ Three independent mechanisms, not one:
   others, for fast/cheap iteration; reserve the full golden set for
   actual gating decisions.
 
-Rough per-full-run cost (25 cases, Haiku + Sonnet task calls + Sonnet
-judge): **under $1**, mostly the judge calls. Verify current per-token
-pricing at [anthropic.com/pricing](https://anthropic.com/pricing) --
+Rough per-full-run cost with the default all-Haiku setup (25 RAG cases +
+10 agent cases, task + judge calls): **a few cents**. Verify current
+per-token pricing at [anthropic.com/pricing](https://anthropic.com/pricing) --
 the numbers in [`harness/core/pricing.py`](harness/core/pricing.py) are
 estimates for relative cost tracking, not a guarantee.
 

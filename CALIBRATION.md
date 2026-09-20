@@ -4,6 +4,17 @@ An LLM-as-judge scorer is an unverified classifier until you check it
 against ground truth. This project treats that check as a first-class,
 versioned artifact rather than an assumption.
 
+**This project defaults the judge to Claude Haiku 4.5** -- the same cheap
+tier as the task model, purely for cost. That makes this calibration
+check load-bearing rather than a formality: a cheap judge grading a
+cheap model's output is exactly the setup where self-preference bias and
+missed subtle hallucinations are most likely to slip through unnoticed.
+Don't skip running this because "it's just Haiku, how wrong could it
+be" -- that's the assumption this file exists to replace with a number.
+If the numbers below come back weak, upgrade `HARNESS_JUDGE_MODEL` to
+`claude-sonnet-5` for the judge role only; the task model can stay
+Haiku regardless.
+
 ## What's being tested
 
 `golden/calibration_labels.jsonl` holds 14 hand-authored
@@ -60,7 +71,8 @@ that mode.)*
 | Judge model | MAE | Correlation | Agreement (+/-0.2) | Notes |
 |---|---|---|---|---|
 | mock (plumbing check only) | 0.493 | undefined (zero variance) | 35.7% | Expected -- mock cannot reason, this only proves the harness runs end to end |
-| claude-sonnet-5 | _TODO: run and fill in_ | | | |
+| claude-haiku-4-5-20251001 (default) | _TODO: run and fill in_ | | | The number that actually matters -- this is what the harness uses unless overridden |
+| claude-sonnet-5 (fallback, only if Haiku's row above is weak) | _TODO if needed_ | | | |
 
 ## What this doesn't cover
 
@@ -73,8 +85,14 @@ set. It does not test:
 - Whether the judge's calibration holds up on a much larger and more
   diverse set of failure modes than the 14 curated here. Fourteen cases
   catch the obvious failure classes; they are a floor, not a ceiling.
-- Judge self-preference bias when the judge model is the same model
-  family as the model being graded. `harness/scorers/llm_judge.py`'s
-  docstring flags this; the CLI defaults the judge to Sonnet regardless
-  of which model is under test, but doesn't yet enforce a hard rule
-  against grading same-model output.
+- Judge self-preference bias when the judge model is the same model as
+  the one being graded. As of the current default, **this is a live risk,
+  not a hypothetical one**: judge and task model are both Haiku 4.5. The
+  calibration set's `human_label`s are independent of any model's
+  self-assessment, so a poor MAE/correlation here would be one real
+  signal of this bias -- but 14 cases against one fixed candidate-answer
+  set can't fully rule it out for arbitrary future outputs. If you
+  upgrade the judge to Sonnet while keeping Haiku as the task model, this
+  risk goes away by construction; the code doesn't yet enforce that as a
+  hard rule, so it's on you to keep them different if this matters for
+  your use case.

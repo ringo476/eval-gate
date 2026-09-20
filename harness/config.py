@@ -57,7 +57,7 @@ def load_config() -> Config:
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
         max_cost_usd=max_cost_usd,
         max_workers=max_workers,
-        judge_model=os.environ.get("HARNESS_JUDGE_MODEL", "claude-sonnet-5"),
+        judge_model=os.environ.get("HARNESS_JUDGE_MODEL", "claude-haiku-4-5-20251001"),
         cache_db_path=os.environ.get("HARNESS_CACHE_DB", ".harness_cache.db"),
         runs_db_path=os.environ.get("HARNESS_RUNS_DB", "runs.db"),
     )
