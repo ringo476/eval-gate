@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+build/
+dist/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -14,3 +16,10 @@ reports/*.md
 reports/*.json
 !reports/.gitkeep
 targets/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
