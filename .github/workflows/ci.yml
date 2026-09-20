@@ -32,5 +32,8 @@ jobs:
       - name: Vendor target app
         run: bash scripts/setup_target.sh
 
-      - name: Smoke run against real pipeline (mock model, $0)
-        run: python -m harness.cli run --provider mock --smoke 5
+      - name: Smoke run -- RAG-fusion pipeline (mock model, $0)
+        run: python -m harness.cli run --task rag_fusion_qa --provider mock --smoke 5
+
+      - name: Smoke run -- tool-calling agent loop (mock model, $0)
+        run: python -m harness.cli run --task tool_agent_qa --provider mock --smoke 5

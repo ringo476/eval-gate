@@ -53,9 +53,16 @@ class ResponseCache:
 
     def put(self, model: str, system: str | None, prompt: str, tools: list | None, response: ProviderResponse) -> None:
         key = _cache_key(model, system, prompt, tools)
-        # `raw` holds the SDK's native response object and isn't JSON-safe/needed once cached
         cacheable = asdict(response)
-        cacheable["raw"] = None
+        # `raw` is normally either None (single-turn generate()) or a
+        # JSON-safe list of content-block dicts (generate_messages(), so a
+        # tool-calling loop can replay a cached turn correctly). Anything
+        # else (e.g. a raw SDK object slipping through) isn't cacheable --
+        # drop it rather than let json.dumps blow up the whole write.
+        try:
+            json.dumps(cacheable)
+        except TypeError:
+            cacheable["raw"] = None
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO response_cache (cache_key, model, response_json) VALUES (?, ?, ?)",

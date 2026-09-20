@@ -1,22 +1,11 @@
 """Semantic similarity to a reference answer, using a local free embedding
 model (no API cost). Use for open-ended answers where exact wording
-doesn't matter but meaning does. Model is loaded lazily and cached as a
-module-level singleton so it's only paid for (in load time) once per
-process, not once per case."""
+doesn't matter but meaning does."""
 from __future__ import annotations
 
+from harness.core.embeddings import cosine_similarity, get_embedding_model
 from harness.core.models import EvalCase, RunTrace, ScoreResult
 from harness.scorers.base import Scorer
-
-_model = None
-
-
-def _get_model():
-    global _model
-    if _model is None:
-        from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _model
 
 
 class EmbeddingSimilarityScorer(Scorer):
@@ -32,11 +21,9 @@ class EmbeddingSimilarityScorer(Scorer):
         if not trace.output_text.strip():
             return ScoreResult(self.name, score=0.0, passed=False, details={"note": "empty output"})
 
-        model = _get_model()
-        import numpy as np
+        model = get_embedding_model()
         emb = model.encode([reference, trace.output_text])
-        a, b = emb[0], emb[1]
-        cos_sim = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
+        cos_sim = cosine_similarity(emb[0], emb[1])
         return ScoreResult(
             self.name,
             score=max(0.0, cos_sim),

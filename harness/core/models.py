@@ -38,6 +38,7 @@ class RunTrace:
     case_id: str
     output_text: str
     retrieved_chunks: list[dict[str, Any]] = field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0

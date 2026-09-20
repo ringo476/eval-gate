@@ -27,31 +27,11 @@ from harness.core.report import render_run_report, write_report
 from harness.core.runner import Runner
 from harness.core.store import RunStore
 from harness.logging_setup import setup_logging
+from harness.tasks import get_task
 
 logger = logging.getLogger("harness.cli")
 
-DEFAULT_DATASET = "golden/rag_fusion_qa.jsonl"
 DEFAULT_CALIBRATION = "golden/calibration_labels.jsonl"
-
-
-def _build_scorers(judge_provider):
-    from harness.scorers.contains import ContainsScorer
-    from harness.scorers.embedding_sim import EmbeddingSimilarityScorer
-    from harness.scorers.llm_judge import LLMJudgeScorer
-    from harness.scorers.retrieval import RetrievalHitRateScorer
-
-    return [
-        ContainsScorer(),
-        RetrievalHitRateScorer(),
-        EmbeddingSimilarityScorer(),
-        LLMJudgeScorer(judge_provider),
-    ]
-
-
-def _build_adapter():
-    from harness.adapters.rag_fusion import RagFusionAdapter
-    from harness.corpus import CORPUS
-    return RagFusionAdapter(CORPUS)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -66,13 +46,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     provider = get_provider(model, api_key, cache, budget)
     judge_provider = get_provider(judge_model, api_key, cache, budget)
 
-    cases = load_jsonl(args.dataset)
+    task_spec = get_task(args.task)
+    dataset_path = args.dataset or task_spec.dataset_path
+    cases = load_jsonl(dataset_path)
     if args.smoke is not None:
         cases = filter_smoke(cases, n=args.smoke)
-    logger.info("loaded %d cases from %s", len(cases), args.dataset)
+    logger.info("loaded %d cases from %s", len(cases), dataset_path)
 
-    adapter = _build_adapter()
-    scorers = _build_scorers(judge_provider)
+    adapter = task_spec.adapter_factory()
+    scorers = task_spec.scorers_factory(judge_provider)
     runner = Runner(adapter, scorers, provider, max_workers=args.max_workers or config.max_workers)
 
     try:
@@ -124,7 +106,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
         print(f"No runs found for task={args.task} model={args.model}", file=sys.stderr)
         return 2
 
-    cases = load_jsonl(args.dataset)
+    dataset_path = args.dataset or get_task(args.task).dataset_path
+    cases = load_jsonl(dataset_path)
     pinned_ids = {c.id for c in cases if c.is_pinned}
     case_results = store.case_results_for_run(run_id)
     diff = diff_runs(store, args.task, args.model, run_id)
@@ -234,7 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", parents=[common], help="Run the golden set against the target app")
     p_run.add_argument("--provider", choices=["anthropic", "mock"], default="mock")
-    p_run.add_argument("--dataset", default=DEFAULT_DATASET)
+    p_run.add_argument("--dataset", default=None, help="Overrides the task's default golden set")
     p_run.add_argument("--smoke", type=int, default=None, help="Run only the first N cases (+ all pinned)")
     p_run.add_argument("--max-cost-usd", type=float, default=None)
     p_run.add_argument("--max-workers", type=int, default=None)
@@ -246,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff.set_defaults(func=cmd_diff)
 
     p_gate = sub.add_parser("gate", parents=[common], help="Exit non-zero if quality bar is not met (for CI)")
-    p_gate.add_argument("--dataset", default=DEFAULT_DATASET)
+    p_gate.add_argument("--dataset", default=None, help="Overrides the task's default golden set")
     p_gate.add_argument("--run-id", default=None)
     p_gate.add_argument("--min-score", type=float, default=0.7)
     p_gate.set_defaults(func=cmd_gate)
