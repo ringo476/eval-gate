@@ -16,8 +16,13 @@ on:
         description: "Minimum mean score required to pass"
         default: "0.75"
         required: false
-  schedule:
-    - cron: "0 6 * * *"  # nightly at 06:00 UTC
+  # The nightly schedule is commented out deliberately: it requires an
+  # ANTHROPIC_API_KEY repo secret (Settings -> Secrets and variables ->
+  # Actions) and an "eval" environment to exist first, or every run fails
+  # immediately and emails a failure notice for no reason. Uncomment the
+  # two lines below once both of those are set up.
+  # schedule:
+  #   - cron: "0 6 * * *"  # nightly at 06:00 UTC
 
 jobs:
   gate:
