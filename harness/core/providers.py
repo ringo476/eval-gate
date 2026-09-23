@@ -2,23 +2,43 @@
 Model provider abstraction.
 
 Layering:
-  AnthropicProvider   -- real API calls, retried with exponential backoff
+  AnthropicProvider / OpenAIProvider -- real API calls, retried with backoff
   BudgetEnforcingProvider -- hard spend cap, checked before each call
   CachingProvider      -- wraps any provider, skips the call on a cache hit
   MockProvider         -- deterministic $0 fake, for developing/testing the
                           harness itself without an API key or spend
 
-Two entry points, both implemented at every layer:
-  generate(prompt, system, tools)          -- single-turn (rag_fusion adapter)
-  generate_messages(messages, system, tools) -- multi-turn conversation,
-      for a tool-calling agent loop that needs to replay its own previous
-      turn (including tool_use blocks) back to the model before it can
-      see a tool_result. `messages` follows Anthropic's message format:
-      [{"role": "user"|"assistant", "content": <str or content-block list>}]
+Every provider implements the same four methods, which is what makes the
+tool-calling agent adapter (harness/adapters/tool_agent.py) provider-
+agnostic instead of hardcoded to one vendor's message format:
+
+  generate(prompt, system, tools)            -- single-turn (rag_fusion adapter)
+  generate_messages(messages, system, tools) -- multi-turn conversation turn
+  build_assistant_message(response)          -- wraps a turn's response back
+                                                 into whatever shape this
+                                                 provider's API expects as an
+                                                 "assistant" message, for
+                                                 replaying it in the next call
+  build_tool_result_messages(tool_results)   -- wraps executed-tool outputs
+                                                 into whatever message shape
+                                                 this provider expects a tool
+                                                 result to look like
+
+Anthropic and OpenAI use genuinely different wire formats for both of the
+last two (Anthropic: one user message with tool_result content blocks;
+OpenAI: one role="tool" message per tool call) -- that's exactly the kind
+of provider-specific detail this abstraction exists to hide from the
+adapter.
+
+`messages` follows a plain [{"role": ..., "content": ...}, ...] shape;
+`tools` follows the neutral schema in harness/adapters/tools.py
+(name/description/parameters) -- each provider converts it to its own
+wire format internally.
 
 Always wire providers through get_provider(), which applies caching and
 budget enforcement automatically -- nothing else in the codebase should
-instantiate AnthropicProvider directly, or you lose that protection.
+instantiate AnthropicProvider/OpenAIProvider directly, or you lose that
+protection.
 """
 from __future__ import annotations
 
@@ -55,39 +75,44 @@ class ModelProvider(ABC):
         system: str | None = None,
         tools: list[dict[str, Any]] | None = None,
     ) -> ProviderResponse:
-        """Like generate(), but for the next turn of an existing multi-turn
-        conversation. response.raw carries the JSON-safe content-block list
-        the caller must append back as this turn's assistant message before
-        sending a tool_result for the next call."""
         ...
 
+    @abstractmethod
+    def build_assistant_message(self, response: ProviderResponse) -> dict[str, Any]:
+        ...
+
+    @abstractmethod
+    def build_tool_result_messages(self, tool_results: list[tuple[dict, str]]) -> list[dict[str, Any]]:
+        """tool_results: [(tool_call_dict, result_text), ...] where
+        tool_call_dict is one of response.tool_calls (has 'id', 'name', 'input')."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Anthropic
+# ---------------------------------------------------------------------------
 
 class AnthropicProvider(ModelProvider):
     def __init__(self, model: str, api_key: str):
         self.name = model
-        import anthropic  # imported lazily so mock-only usage never needs the package
+        import anthropic  # imported lazily so unused providers never need the package
         self._client = anthropic.Anthropic(api_key=api_key)
         self._RateLimitError = anthropic.RateLimitError
         self._APIConnectionError = anthropic.APIConnectionError
-        self._APIStatusError = anthropic.APIStatusError
 
-    def generate(
-        self,
-        prompt: str,
-        system: str | None = None,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> ProviderResponse:
+    @staticmethod
+    def _convert_tools(tools: list[dict] | None):
+        if not tools:
+            return None
+        return [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in tools]
+
+    def generate(self, prompt, system=None, tools=None) -> ProviderResponse:
         return self._call([{"role": "user", "content": prompt}], system, tools)
 
-    def generate_messages(
-        self,
-        messages: list[dict[str, Any]],
-        system: str | None = None,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> ProviderResponse:
+    def generate_messages(self, messages, system=None, tools=None) -> ProviderResponse:
         return self._call(messages, system, tools)
 
-    def _call(self, messages: list[dict[str, Any]], system, tools) -> ProviderResponse:
+    def _call(self, messages, system, tools) -> ProviderResponse:
         @retry(
             retry=retry_if_exception_type((self._RateLimitError, self._APIConnectionError)),
             wait=wait_random_exponential(multiplier=1, max=30),
@@ -96,22 +121,17 @@ class AnthropicProvider(ModelProvider):
         )
         def _call() -> ProviderResponse:
             start = time.perf_counter()
-            kwargs: dict[str, Any] = dict(
-                model=self.name,
-                max_tokens=1024,
-                messages=messages,
-            )
+            kwargs: dict[str, Any] = dict(model=self.name, max_tokens=1024, messages=messages)
             if system:
                 kwargs["system"] = system
-            if tools:
-                kwargs["tools"] = tools
+            converted_tools = self._convert_tools(tools)
+            if converted_tools:
+                kwargs["tools"] = converted_tools
 
             resp = self._client.messages.create(**kwargs)
             latency_ms = (time.perf_counter() - start) * 1000
 
-            text_parts = []
-            tool_calls = []
-            raw_blocks = []
+            text_parts, tool_calls, raw_blocks = [], [], []
             for block in resp.content:
                 if block.type == "text":
                     text_parts.append(block.text)
@@ -121,19 +141,117 @@ class AnthropicProvider(ModelProvider):
                     raw_blocks.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
 
             return ProviderResponse(
-                text="".join(text_parts),
-                tool_calls=tool_calls,
-                input_tokens=resp.usage.input_tokens,
-                output_tokens=resp.usage.output_tokens,
-                latency_ms=latency_ms,
-                # JSON-safe content blocks, so a tool-calling loop can replay
-                # this exact assistant turn back to the API, AND so this
-                # response can still be cached/restored intact (see cache.py).
-                raw=raw_blocks,
+                text="".join(text_parts), tool_calls=tool_calls,
+                input_tokens=resp.usage.input_tokens, output_tokens=resp.usage.output_tokens,
+                latency_ms=latency_ms, raw=raw_blocks,
             )
 
         return _call()
 
+    def build_assistant_message(self, response: ProviderResponse) -> dict:
+        return {"role": "assistant", "content": response.raw}
+
+    def build_tool_result_messages(self, tool_results: list[tuple[dict, str]]) -> list[dict]:
+        return [{"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tc["id"], "content": result}
+            for tc, result in tool_results
+        ]}]
+
+
+# ---------------------------------------------------------------------------
+# OpenAI
+# ---------------------------------------------------------------------------
+
+class OpenAIProvider(ModelProvider):
+    def __init__(self, model: str, api_key: str):
+        self.name = model
+        import openai  # imported lazily so unused providers never need the package
+        self._client = openai.OpenAI(api_key=api_key)
+        self._RateLimitError = openai.RateLimitError
+        self._APIConnectionError = openai.APIConnectionError
+
+    @staticmethod
+    def _convert_tools(tools: list[dict] | None):
+        if not tools:
+            return None
+        return [
+            {"type": "function", "function": {
+                "name": t["name"], "description": t["description"], "parameters": t["parameters"],
+            }}
+            for t in tools
+        ]
+
+    def generate(self, prompt, system=None, tools=None) -> ProviderResponse:
+        messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+        return self._call(messages, tools)
+
+    def generate_messages(self, messages, system=None, tools=None) -> ProviderResponse:
+        full_messages = ([{"role": "system", "content": system}] if system else []) + list(messages)
+        return self._call(full_messages, tools)
+
+    def _call(self, messages, tools) -> ProviderResponse:
+        @retry(
+            retry=retry_if_exception_type((self._RateLimitError, self._APIConnectionError)),
+            wait=wait_random_exponential(multiplier=1, max=30),
+            stop=stop_after_attempt(5),
+            reraise=True,
+        )
+        def _call() -> ProviderResponse:
+            start = time.perf_counter()
+            kwargs: dict[str, Any] = dict(model=self.name, max_tokens=1024, messages=messages)
+            converted_tools = self._convert_tools(tools)
+            if converted_tools:
+                kwargs["tools"] = converted_tools
+
+            resp = self._client.chat.completions.create(**kwargs)
+            latency_ms = (time.perf_counter() - start) * 1000
+            msg = resp.choices[0].message
+
+            tool_calls = []
+            raw_tool_calls = None
+            if msg.tool_calls:
+                raw_tool_calls = []
+                for tc in msg.tool_calls:
+                    try:
+                        parsed_args = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError:
+                        parsed_args = {}
+                    tool_calls.append({"name": tc.function.name, "input": parsed_args, "id": tc.id})
+                    raw_tool_calls.append({
+                        "id": tc.id, "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    })
+
+            # raw carries exactly what's needed to reconstruct this turn's
+            # assistant message later: text content plus, if present,
+            # OpenAI's own tool_calls shape (arguments kept as the original
+            # JSON string, since that's what the API expects back verbatim).
+            raw = {"content": msg.content, "tool_calls": raw_tool_calls}
+
+            return ProviderResponse(
+                text=msg.content or "", tool_calls=tool_calls,
+                input_tokens=resp.usage.prompt_tokens, output_tokens=resp.usage.completion_tokens,
+                latency_ms=latency_ms, raw=raw,
+            )
+
+        return _call()
+
+    def build_assistant_message(self, response: ProviderResponse) -> dict:
+        message: dict[str, Any] = {"role": "assistant", "content": response.raw.get("content")}
+        if response.raw.get("tool_calls"):
+            message["tool_calls"] = response.raw["tool_calls"]
+        return message
+
+    def build_tool_result_messages(self, tool_results: list[tuple[dict, str]]) -> list[dict]:
+        return [
+            {"role": "tool", "tool_call_id": tc["id"], "content": result}
+            for tc, result in tool_results
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Wrappers (budget, cache) -- delegate every method to the wrapped provider
+# ---------------------------------------------------------------------------
 
 class BudgetEnforcingProvider(ModelProvider):
     """
@@ -144,7 +262,7 @@ class BudgetEnforcingProvider(ModelProvider):
     count against the budget.
     """
 
-    MAX_OUTPUT_TOKENS = 1024  # kept in sync with AnthropicProvider's max_tokens
+    MAX_OUTPUT_TOKENS = 1024  # kept in sync with each provider's max_tokens
 
     def __init__(self, inner: ModelProvider, budget, estimate_cost_fn):
         self.name = inner.name
@@ -155,7 +273,6 @@ class BudgetEnforcingProvider(ModelProvider):
     def _enforce(self, worst_case_input_tokens: int, call_fn):
         worst_case_cost = self._estimate_cost_fn(self.name, worst_case_input_tokens, self.MAX_OUTPUT_TOKENS)
         self._budget.check_and_reserve(worst_case_cost)
-
         response = call_fn()
         actual_cost = self._estimate_cost_fn(self.name, response.input_tokens, response.output_tokens)
         self._budget.record(actual_cost)
@@ -168,6 +285,12 @@ class BudgetEnforcingProvider(ModelProvider):
     def generate_messages(self, messages, system=None, tools=None) -> ProviderResponse:
         worst_case = len(json.dumps(messages).split()) + len((system or "").split())
         return self._enforce(worst_case, lambda: self._inner.generate_messages(messages, system=system, tools=tools))
+
+    def build_assistant_message(self, response):
+        return self._inner.build_assistant_message(response)
+
+    def build_tool_result_messages(self, tool_results):
+        return self._inner.build_tool_result_messages(tool_results)
 
 
 class CachingProvider(ModelProvider):
@@ -202,12 +325,25 @@ class CachingProvider(ModelProvider):
         response.cache_hit = False
         return response
 
+    def build_assistant_message(self, response):
+        return self._inner.build_assistant_message(response)
+
+    def build_tool_result_messages(self, tool_results):
+        return self._inner.build_tool_result_messages(tool_results)
+
+
+# ---------------------------------------------------------------------------
+# Mock
+# ---------------------------------------------------------------------------
 
 class MockProvider(ModelProvider):
     """
     Deterministic fake provider for $0 development/testing of the harness
     itself. Rule-based and NOT meant to score well -- just exercises every
     code path (including a multi-step tool-calling loop) with zero cost.
+    Uses its own simple raw-message convention (mirroring Anthropic's
+    shape); nothing sends it over a real API, so that's an implementation
+    detail, not a compatibility requirement.
     """
 
     def __init__(self, model: str = "mock"):
@@ -223,9 +359,6 @@ class MockProvider(ModelProvider):
         )
 
     def generate_messages(self, messages, system=None, tools=None) -> ProviderResponse:
-        """Simulates one agent turn: if the most recent message is a
-        tool_result, give a final text answer; otherwise, if tools are
-        available, call one heuristically based on the user's question."""
         start = time.perf_counter()
         last = messages[-1]
         already_used_tool = last["role"] == "user" and isinstance(last["content"], list) and any(
@@ -255,25 +388,43 @@ class MockProvider(ModelProvider):
             raw=[{"type": "tool_use", "id": "mock-call-1", "name": tool_name, "input": tool_input}],
         )
 
+    def build_assistant_message(self, response: ProviderResponse) -> dict:
+        return {"role": "assistant", "content": response.raw}
+
+    def build_tool_result_messages(self, tool_results: list[tuple[dict, str]]) -> list[dict]:
+        return [{"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tc["id"], "content": result}
+            for tc, result in tool_results
+        ]}]
+
+
+# ---------------------------------------------------------------------------
 
 def get_provider(
+    provider_name: str,
     model: str,
     api_key: str | None,
     cache: ResponseCache | None,
     budget=None,
 ) -> ModelProvider:
-    if model == "mock":
+    if provider_name == "mock":
         return MockProvider()
 
     if not api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is required for model "
-            f"'{model}'. Use --provider mock to run without one."
+            f"An API key is required for provider '{provider_name}' (model '{model}'). "
+            "Use --provider mock to run without one."
         )
 
     from harness.core.pricing import estimate_cost_usd
 
-    provider: ModelProvider = AnthropicProvider(model, api_key)
+    if provider_name == "anthropic":
+        provider: ModelProvider = AnthropicProvider(model, api_key)
+    elif provider_name == "openai":
+        provider = OpenAIProvider(model, api_key)
+    else:
+        raise ValueError(f"Unknown provider '{provider_name}'. Expected 'anthropic', 'openai', or 'mock'.")
+
     if budget is not None:
         provider = BudgetEnforcingProvider(provider, budget, estimate_cost_usd)
     if cache is not None:

@@ -69,6 +69,15 @@ def test_tool_agent_adapter_never_raises_on_bad_tool_input():
                 raw=[{"type": "tool_use", "id": "x", "name": "calculator", "input": {}}],
             )
 
+        def build_assistant_message(self, response):
+            return {"role": "assistant", "content": response.raw}
+
+        def build_tool_result_messages(self, tool_results):
+            return [{"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tc["id"], "content": result}
+                for tc, result in tool_results
+            ]}]
+
     adapter = ToolAgentAdapter()
     case = EvalCase(id="ta-bad", task="tool_agent_qa", input={"query": "..."}, expected={})
     trace = adapter.run(case, BadToolCallProvider())

@@ -1,6 +1,6 @@
 name: Eval Gate
 
-# This is the workflow that actually costs money (real Claude calls), so
+# This is the workflow that actually costs money (real OpenAI calls), so
 # it is NOT wired to run on every push -- that would be an unbounded,
 # unreviewed spend trigger on every commit, including from forks. Real
 # teams run this on a schedule (nightly) and/or manually before a
@@ -10,14 +10,14 @@ on:
     inputs:
       model:
         description: "Model under test"
-        default: "claude-haiku-4-5-20251001"
+        default: "gpt-4o-mini"
         required: false
       min_score:
         description: "Minimum mean score required to pass"
         default: "0.75"
         required: false
   # The nightly schedule is commented out deliberately: it requires an
-  # ANTHROPIC_API_KEY repo secret (Settings -> Secrets and variables ->
+  # OPENAI_API_KEY repo secret (Settings -> Secrets and variables ->
   # Actions) and an "eval" environment to exist first, or every run fails
   # immediately and emails a failure notice for no reason. Uncomment the
   # two lines below once both of those are set up.
@@ -44,19 +44,19 @@ jobs:
 
       - name: Run golden set
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           HARNESS_MAX_COST_USD: "3.00"
         run: >
           python -m harness.cli run
-          --provider anthropic
-          --model "${{ github.event.inputs.model || 'claude-haiku-4-5-20251001' }}"
+          --provider openai
+          --model "${{ github.event.inputs.model || 'gpt-4o-mini' }}"
 
       - name: Gate on quality bar
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: >
           python -m harness.cli gate
-          --model "${{ github.event.inputs.model || 'claude-haiku-4-5-20251001' }}"
+          --model "${{ github.event.inputs.model || 'gpt-4o-mini' }}"
           --min-score "${{ github.event.inputs.min_score || '0.75' }}"
 
       - name: Upload report

@@ -1,14 +1,17 @@
 """
 CLI entry point.
 
-    python -m harness.cli run --model claude-haiku-4-5-20251001 --smoke 8
-    python -m harness.cli gate --model claude-haiku-4-5-20251001 --min-score 0.75
-    python -m harness.cli calibrate
-    python -m harness.cli history --model claude-sonnet-5
+    python -m harness.cli run --model gpt-4o-mini --smoke 8
+    python -m harness.cli gate --model gpt-4o-mini --min-score 0.75
+    python -m harness.cli calibrate --provider openai
+    python -m harness.cli history --model gpt-4o-mini
 
-Every subcommand defaults to --provider mock unless --provider anthropic
-is passed explicitly, so an unfamiliar reader cannot accidentally spend
-money by copy-pasting a command from the README.
+Every subcommand defaults to --provider mock unless --provider openai (or
+--provider anthropic) is passed explicitly, so an unfamiliar reader
+cannot accidentally spend money by copy-pasting a command from the
+README. OpenAI is the primary/documented provider for this project;
+Anthropic is supported by the same ModelProvider abstraction but isn't
+the default -- see PROJECT_GUIDE.md.
 """
 from __future__ import annotations
 
@@ -33,18 +36,31 @@ logger = logging.getLogger("harness.cli")
 
 DEFAULT_CALIBRATION = "golden/calibration_labels.jsonl"
 
+# Used when HARNESS_JUDGE_MODEL isn't set in .env -- a judge model name
+# only makes sense paired with a matching provider, so the default is
+# looked up by whichever --provider was actually chosen, not hardcoded
+# to one vendor.
+DEFAULT_JUDGE_MODEL_BY_PROVIDER = {
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-haiku-4-5-20251001",
+    "mock": "mock",
+}
+
+
+def _resolve_judge_model(config, provider_name: str) -> str:
+    return config.judge_model or DEFAULT_JUDGE_MODEL_BY_PROVIDER.get(provider_name, "gpt-4o-mini")
+
 
 def cmd_run(args: argparse.Namespace) -> int:
     config = load_config()
     cache = None if args.no_cache else ResponseCache(config.cache_db_path)
     budget = BudgetGuard(args.max_cost_usd or config.max_cost_usd)
 
-    api_key = None if args.provider == "mock" else config.require_api_key()
-    model = "mock" if args.provider == "mock" else args.model
-    judge_model = "mock" if args.provider == "mock" else config.judge_model
+    api_key = None if args.provider == "mock" else config.require_api_key(args.provider)
+    judge_model = _resolve_judge_model(config, args.provider)
 
-    provider = get_provider(model, api_key, cache, budget)
-    judge_provider = get_provider(judge_model, api_key, cache, budget)
+    provider = get_provider(args.provider, args.model, api_key, cache, budget)
+    judge_provider = get_provider(args.provider, judge_model, api_key, cache, budget)
 
     task_spec = get_task(args.task)
     dataset_path = args.dataset or task_spec.dataset_path
@@ -141,10 +157,10 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     import numpy as np
 
     config = load_config()
-    api_key = None if args.provider == "mock" else config.require_api_key()
-    judge_model = "mock" if args.provider == "mock" else config.judge_model
+    api_key = None if args.provider == "mock" else config.require_api_key(args.provider)
+    judge_model = _resolve_judge_model(config, args.provider)
     cache = None if args.no_cache else ResponseCache(config.cache_db_path)
-    judge_provider = get_provider(judge_model, api_key, cache)
+    judge_provider = get_provider(args.provider, judge_model, api_key, cache)
 
     from harness.scorers.llm_judge import LLMJudgeScorer
     judge = LLMJudgeScorer(judge_provider)
@@ -213,10 +229,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--task", default="rag_fusion_qa")
-    common.add_argument("--model", default="claude-haiku-4-5-20251001")
+    common.add_argument("--model", default="gpt-4o-mini")
 
     p_run = sub.add_parser("run", parents=[common], help="Run the golden set against the target app")
-    p_run.add_argument("--provider", choices=["anthropic", "mock"], default="mock")
+    p_run.add_argument("--provider", choices=["openai", "anthropic", "mock"], default="mock")
     p_run.add_argument("--dataset", default=None, help="Overrides the task's default golden set")
     p_run.add_argument("--smoke", type=int, default=None, help="Run only the first N cases (+ all pinned)")
     p_run.add_argument("--max-cost-usd", type=float, default=None)
@@ -235,7 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_gate.set_defaults(func=cmd_gate)
 
     p_cal = sub.add_parser("calibrate", help="Check the LLM judge against hand-labeled examples")
-    p_cal.add_argument("--provider", choices=["anthropic", "mock"], default="mock")
+    p_cal.add_argument("--provider", choices=["openai", "anthropic", "mock"], default="mock")
     p_cal.add_argument("--dataset", default=DEFAULT_CALIBRATION)
     p_cal.add_argument("--no-cache", action="store_true")
     p_cal.set_defaults(func=cmd_calibrate)

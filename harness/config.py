@@ -18,20 +18,31 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class Config:
+    openai_api_key: str | None
     anthropic_api_key: str | None
     max_cost_usd: float
     max_workers: int
-    judge_model: str
+    judge_model: str | None
     cache_db_path: str
     runs_db_path: str
 
-    def require_api_key(self) -> str:
-        if not self.anthropic_api_key:
-            raise RuntimeError(
-                "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and fill it in, "
-                "or pass --provider mock to develop/test without an API key or spending money."
-            )
-        return self.anthropic_api_key
+    def require_api_key(self, provider_name: str) -> str:
+        if provider_name == "openai":
+            if not self.openai_api_key:
+                raise RuntimeError(
+                    "OPENAI_API_KEY is not set. Copy .env.example to .env and fill it in "
+                    "(get a key at https://platform.openai.com/api-keys), or pass "
+                    "--provider mock to develop/test without an API key or spending money."
+                )
+            return self.openai_api_key
+        if provider_name == "anthropic":
+            if not self.anthropic_api_key:
+                raise RuntimeError(
+                    "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and fill it in, "
+                    "or pass --provider mock to develop/test without an API key or spending money."
+                )
+            return self.anthropic_api_key
+        raise ValueError(f"Unknown provider '{provider_name}'. Expected 'openai', 'anthropic', or 'mock'.")
 
 
 def load_config() -> Config:
@@ -54,10 +65,15 @@ def load_config() -> Config:
         raise RuntimeError("HARNESS_MAX_COST_USD must be > 0")
 
     return Config(
+        openai_api_key=os.environ.get("OPENAI_API_KEY"),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
         max_cost_usd=max_cost_usd,
         max_workers=max_workers,
-        judge_model=os.environ.get("HARNESS_JUDGE_MODEL", "claude-haiku-4-5-20251001"),
+        # None (not a hardcoded default) when unset: the CLI picks a
+        # sensible default *for whichever --provider was chosen*, since a
+        # judge model name only makes sense paired with a matching
+        # provider (see DEFAULT_JUDGE_MODEL_BY_PROVIDER in cli.py).
+        judge_model=os.environ.get("HARNESS_JUDGE_MODEL"),
         cache_db_path=os.environ.get("HARNESS_CACHE_DB", ".harness_cache.db"),
         runs_db_path=os.environ.get("HARNESS_RUNS_DB", "runs.db"),
     )

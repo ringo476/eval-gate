@@ -24,36 +24,41 @@ It evaluates two different kinds of application through the same core:
   turn, whether to call a tool, which one, and when it has enough to
   answer, rather than following a scripted sequence
 
-## Getting an Anthropic API key
+## Getting an OpenAI API key
 
-1. Go to **[console.anthropic.com](https://console.anthropic.com)** and
-   sign up or log in. This is separate from a claude.ai chat subscription
-   -- API access is billed separately, pay-as-you-go per token.
+1. Go to **[platform.openai.com](https://platform.openai.com)** and sign
+   up or log in. This is separate from a ChatGPT chat subscription --
+   API access is billed separately, pay-as-you-go per token.
 2. Add billing details and some credit (a few dollars is more than
    enough for this project -- see the cost estimates in README.md).
-3. Go to **Settings -> API Keys** and create a new key.
+3. Go to **[platform.openai.com/api-keys](https://platform.openai.com/api-keys)**
+   and create a new key.
 4. In this project: copy `.env.example` to `.env`, paste the key in as
-   `ANTHROPIC_API_KEY=sk-ant-...`. `.env` is gitignored -- it will never
-   be committed or pushed.
+   `OPENAI_API_KEY=sk-...`. `.env` is gitignored -- it will never be
+   committed or pushed.
 
 Everything in this project defaults to `--provider mock` (a free, fake
 model), so nothing requires this key until you deliberately pass
-`--provider anthropic`.
+`--provider openai`.
+
+(Anthropic is also supported through the same `ModelProvider`
+abstraction -- `--provider anthropic` with `ANTHROPIC_API_KEY` set -- but
+isn't the default for this project.)
 
 ## Models used
 
 | Role | Model | Notes |
 |---|---|---|
-| Task model (default) | `claude-haiku-4-5-20251001` | Cheapest viable tier; what's actually being evaluated |
-| Task model (optional) | `claude-sonnet-5` | Only if you want to compare a stronger model against Haiku on identical inputs |
-| Judge (default) | `claude-haiku-4-5-20251001` | Same cheap tier, by default -- see CALIBRATION.md for why this is checked, not assumed |
-| Judge (optional upgrade) | `claude-sonnet-5` | Set via `HARNESS_JUDGE_MODEL` in `.env` if calibration shows Haiku isn't reliable enough |
+| Task model (default) | `gpt-4o-mini` | Cheapest viable OpenAI tier; what's actually being evaluated |
+| Task model (optional) | `gpt-4o` | Only if you want to compare a stronger model against the mini tier on identical inputs |
+| Judge (default) | `gpt-4o-mini` | Same cheap tier, by default -- see CALIBRATION.md for why this is checked, not assumed |
+| Judge (optional upgrade) | `gpt-4o` | Set via `HARNESS_JUDGE_MODEL` in `.env` if calibration shows the mini tier isn't reliable enough |
 | Embeddings | `all-MiniLM-L6-v2` | Runs locally via `sentence-transformers` -- free, no API key needed, downloaded once from Hugging Face on first use |
 
 ## End-to-end flow
 
 ```
-python -m harness.cli run --task rag_fusion_qa --provider anthropic --smoke 10
+python -m harness.cli run --task rag_fusion_qa --provider openai --smoke 10
 ```
 
 1. **`harness/cli.py: main()`** parses args, sets up logging, dispatches
@@ -64,7 +69,7 @@ python -m harness.cli run --task rag_fusion_qa --provider anthropic --smoke 10
    (`harness/core/cache.py`) and a `BudgetGuard`
    (`harness/core/budget.py`), and gets a provider for the task model and
    a separate one for the judge via `get_provider()`
-   (`harness/core/providers.py`) -- this wraps the raw Anthropic client in
+   (`harness/core/providers.py`) -- this wraps the raw OpenAI (or Anthropic) client in
    budget-checking and caching layers automatically.
 3. The golden dataset is loaded with `load_jsonl()`
    (`harness/core/dataset.py`), optionally trimmed to a `--smoke N`
@@ -118,7 +123,7 @@ python -m harness.cli run --task rag_fusion_qa --provider anthropic --smoke 10
 | Cost tracking + per-token pricing | `harness/core/pricing.py` |
 | Hard spend cap | `harness/core/budget.py` |
 | Response caching (so reruns are free) | `harness/core/cache.py` |
-| Model calls (Anthropic + mock), retries | `harness/core/providers.py` |
+| Model calls (OpenAI, Anthropic, mock), retries | `harness/core/providers.py` |
 | Golden dataset loading/validation | `harness/core/dataset.py` |
 | Concurrent execution + error isolation | `harness/core/runner.py` |
 | Run history (SQLite) | `harness/core/store.py` |

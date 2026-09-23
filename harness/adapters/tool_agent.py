@@ -67,22 +67,21 @@ class ToolAgentAdapter(Adapter):
                         cache_hit=all_cached,
                     )
 
-                # Replay this exact assistant turn (including tool_use
-                # blocks with their ids) before sending tool results --
-                # the API requires the tool_use id to be echoed back in a
-                # matching tool_result, not just the plain text answer.
-                messages.append({"role": "assistant", "content": response.raw})
+                # Replay this exact assistant turn before sending tool
+                # results back -- every provider's API needs its own prior
+                # tool-call turn echoed back before it will accept a
+                # matching tool result, but the *shape* of that message
+                # differs by provider (Anthropic: content blocks;
+                # OpenAI: a `tool_calls` field). That's exactly what
+                # build_assistant_message() hides from this adapter.
+                messages.append(provider.build_assistant_message(response))
 
-                tool_result_blocks = []
+                executed = []
                 for tc in response.tool_calls:
                     result_text = execute_tool(tc["name"], tc["input"])
                     tool_calls_made.append(tc)
-                    tool_result_blocks.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc["id"],
-                        "content": result_text,
-                    })
-                messages.append({"role": "user", "content": tool_result_blocks})
+                    executed.append((tc, result_text))
+                messages.extend(provider.build_tool_result_messages(executed))
 
             # Hit MAX_STEPS without a final answer -- report it as a real
             # failure (empty output), not a silent success with no answer.

@@ -62,7 +62,7 @@ golden/*.jsonl ──► dataset.py ──► EvalCase[]      (harness/tasks.py 
         ┌────────────────────────────┼─────────────────────────────┐
         ▼                            ▼                              ▼
   One adapter per task:        ModelProvider chain              Scorers
-  RagFusionAdapter            Anthropic ──► BudgetGuard        (per task, e.g.
+  RagFusionAdapter            OpenAI/Anthropic ──► BudgetGuard (per task, e.g.
   (fixed pipeline)                ──► ResponseCache             contains,
   ToolAgentAdapter             (or MockProvider, $0)            retrieval_hit_rate /
   (agentic tool-call loop,     generate() single-turn,          tool_usage,
@@ -91,10 +91,14 @@ never modified): `vector_search` and `reciprocal_rank_fusion` -- this
 logic is already model-agnostic.
 
 **What's reimplemented** in [`harness/adapters/rag_fusion.py`](harness/adapters/rag_fusion.py):
-query expansion and answer synthesis, which the original hardcodes to
-OpenAI's client. These are rewritten against this project's own
-`ModelProvider` abstraction with equivalent prompts, so the harness can
-run different Claude models through an otherwise-identical pipeline.
+query expansion and answer synthesis, which the original hardcodes
+directly to OpenAI's client with no retry/caching/budget logic. These
+are rewritten against this project's own `ModelProvider` abstraction
+with equivalent prompts -- this project also defaults to OpenAI, so the
+underlying API is the same one the original uses, but going through
+`ModelProvider` adds response caching, a hard spend cap, retries, and the
+ability to swap in a different model (including a different provider
+entirely, e.g. `--provider anthropic`) without touching the adapter.
 
 **Worth knowing:** rag-fusion already ships its own, fairly sophisticated
 eval tooling (`eval/` -- retrieval metrics against NFCorpus, an LLM-judge
@@ -148,22 +152,26 @@ pytest -q                        # 43 tests, all mock-based, $0
 ```
 
 To run against real models, copy `.env.example` to `.env`, fill in
-`ANTHROPIC_API_KEY`, then:
+`OPENAI_API_KEY` (get one at [platform.openai.com/api-keys](https://platform.openai.com/api-keys)), then:
 
 ```bash
-python -m harness.cli run --task rag_fusion_qa --provider anthropic --model claude-haiku-4-5-20251001 --smoke 10
-python -m harness.cli run --task tool_agent_qa --provider anthropic --model claude-haiku-4-5-20251001 --smoke 10
-python -m harness.cli gate --task rag_fusion_qa --model claude-haiku-4-5-20251001 --min-score 0.75
-python -m harness.cli calibrate --provider anthropic
+python -m harness.cli run --task rag_fusion_qa --provider openai --model gpt-4o-mini --smoke 10
+python -m harness.cli run --task tool_agent_qa --provider openai --model gpt-4o-mini --smoke 10
+python -m harness.cli gate --task rag_fusion_qa --model gpt-4o-mini --min-score 0.75
+python -m harness.cli calibrate --provider openai
 ```
+
+Anthropic is also supported through the same `ModelProvider` abstraction
+(`--provider anthropic`, `ANTHROPIC_API_KEY` in `.env`) but isn't the
+default for this project.
 
 ## Models
 
 | Role | Model | Why |
 |---|---|---|
-| Task model (default) | `claude-haiku-4-5-20251001` | Cheapest viable tier -- used for both iteration and the actual run by default |
-| Task model (optional comparison) | `claude-sonnet-5` | Only added once Haiku's results are in hand, to measure the Haiku/Sonnet tradeoff on identical inputs -- not required to use this project |
-| Judge (default) | `claude-haiku-4-5-20251001` | Cheapest option, same tier as the task model. This is *not* trusted blindly -- see [CALIBRATION.md](CALIBRATION.md): run `harness calibrate` and check the MAE/correlation before relying on it for gating. Bump to `claude-sonnet-5` only if calibration shows Haiku isn't good enough, and only for the judge role. |
+| Task model (default) | `gpt-4o-mini` | Cheapest viable OpenAI tier -- used for both iteration and the actual run by default |
+| Task model (optional comparison) | `gpt-4o` | Only added once the mini tier's results are in hand, to measure the cost/quality tradeoff on identical inputs -- not required to use this project |
+| Judge (default) | `gpt-4o-mini` | Cheapest option, same tier as the task model. This is *not* trusted blindly -- see [CALIBRATION.md](CALIBRATION.md): run `harness calibrate` and check the MAE/correlation before relying on it for gating. Bump to `gpt-4o` (via `HARNESS_JUDGE_MODEL`) only if calibration shows the mini tier isn't good enough, and only for the judge role. |
 | Embeddings | `all-MiniLM-L6-v2` (local, via sentence-transformers) | Free, no API cost, run as many similarity checks as needed |
 
 ## Cost controls
@@ -182,9 +190,10 @@ Three independent mechanisms, not one:
   others, for fast/cheap iteration; reserve the full golden set for
   actual gating decisions.
 
-Rough per-full-run cost with the default all-Haiku setup (25 RAG cases +
-10 agent cases, task + judge calls): **a few cents**. Verify current
-per-token pricing at [anthropic.com/pricing](https://anthropic.com/pricing) --
+Rough per-full-run cost with the default all-`gpt-4o-mini` setup (25 RAG
+cases + 10 agent cases, task + judge calls): **a few cents**. Verify
+current per-token pricing at
+[platform.openai.com/docs/pricing](https://platform.openai.com/docs/pricing) --
 the numbers in [`harness/core/pricing.py`](harness/core/pricing.py) are
 estimates for relative cost tracking, not a guarantee.
 

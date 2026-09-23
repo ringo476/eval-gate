@@ -21,7 +21,7 @@ TOOL_SCHEMAS = [
         "name": "calculator",
         "description": "Evaluates a basic arithmetic expression (numbers, + - * / and parentheses only). "
                         "Use this for any arithmetic instead of computing it yourself.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "expression": {"type": "string", "description": "e.g. '(12 + 8) * 3'"},
@@ -33,7 +33,7 @@ TOOL_SCHEMAS = [
         "name": "kb_lookup",
         "description": "Searches a small internal knowledge base of climate-change facts and returns the "
                         "most relevant entry. Use this for any factual question instead of guessing.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "topic": {"type": "string", "description": "What to look up, e.g. 'ocean acidification'"},
