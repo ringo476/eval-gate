@@ -1,10 +1,10 @@
 """
 CLI entry point.
 
-    python -m harness.cli run --model gpt-4o-mini --smoke 8
-    python -m harness.cli gate --model gpt-4o-mini --min-score 0.75
+    python -m harness.cli run --model gpt-6-luna --smoke 8
+    python -m harness.cli gate --model gpt-6-luna --min-score 0.75
     python -m harness.cli calibrate --provider openai
-    python -m harness.cli history --model gpt-4o-mini
+    python -m harness.cli history --model gpt-6-luna
 
 Every subcommand defaults to --provider mock unless --provider openai (or
 --provider anthropic) is passed explicitly, so an unfamiliar reader
@@ -41,14 +41,14 @@ DEFAULT_CALIBRATION = "golden/calibration_labels.jsonl"
 # looked up by whichever --provider was actually chosen, not hardcoded
 # to one vendor.
 DEFAULT_JUDGE_MODEL_BY_PROVIDER = {
-    "openai": "gpt-4o-mini",
+    "openai": "gpt-6-luna",
     "anthropic": "claude-haiku-4-5-20251001",
     "mock": "mock",
 }
 
 
 def _resolve_judge_model(config, provider_name: str) -> str:
-    return config.judge_model or DEFAULT_JUDGE_MODEL_BY_PROVIDER.get(provider_name, "gpt-4o-mini")
+    return config.judge_model or DEFAULT_JUDGE_MODEL_BY_PROVIDER.get(provider_name, "gpt-6-luna")
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -229,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--task", default="rag_fusion_qa")
-    common.add_argument("--model", default="gpt-4o-mini")
+    common.add_argument("--model", default="gpt-6-luna")
 
     p_run = sub.add_parser("run", parents=[common], help="Run the golden set against the target app")
     p_run.add_argument("--provider", choices=["openai", "anthropic", "mock"], default="mock")

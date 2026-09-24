@@ -10,7 +10,7 @@ on:
     inputs:
       model:
         description: "Model under test"
-        default: "gpt-4o-mini"
+        default: "gpt-6-luna"
         required: false
       min_score:
         description: "Minimum mean score required to pass"
@@ -49,14 +49,14 @@ jobs:
         run: >
           python -m harness.cli run
           --provider openai
-          --model "${{ github.event.inputs.model || 'gpt-4o-mini' }}"
+          --model "${{ github.event.inputs.model || 'gpt-6-luna' }}"
 
       - name: Gate on quality bar
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: >
           python -m harness.cli gate
-          --model "${{ github.event.inputs.model || 'gpt-4o-mini' }}"
+          --model "${{ github.event.inputs.model || 'gpt-6-luna' }}"
           --min-score "${{ github.event.inputs.min_score || '0.75' }}"
 
       - name: Upload report

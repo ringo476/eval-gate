@@ -49,10 +49,10 @@ isn't the default for this project.)
 
 | Role | Model | Notes |
 |---|---|---|
-| Task model (default) | `gpt-4o-mini` | Cheapest viable OpenAI tier; what's actually being evaluated |
-| Task model (optional) | `gpt-4o` | Only if you want to compare a stronger model against the mini tier on identical inputs |
-| Judge (default) | `gpt-4o-mini` | Same cheap tier, by default -- see CALIBRATION.md for why this is checked, not assumed |
-| Judge (optional upgrade) | `gpt-4o` | Set via `HARNESS_JUDGE_MODEL` in `.env` if calibration shows the mini tier isn't reliable enough |
+| Task model (default) | `gpt-6-luna` | Cheapest current OpenAI tier; what's actually being evaluated. OpenAI's lineup moves fast -- verified live on 2026-09-24, re-check platform.openai.com/docs/models before assuming this is still current |
+| Task model (optional) | `gpt-6-sol` | Only if you want to compare a stronger model against Luna on identical inputs |
+| Judge (default) | `gpt-6-luna` | Same cheap tier, by default -- see CALIBRATION.md for why this is checked, not assumed |
+| Judge (optional upgrade) | `gpt-6-sol` | Set via `HARNESS_JUDGE_MODEL` in `.env` if calibration shows Luna isn't reliable enough |
 | Embeddings | `all-MiniLM-L6-v2` | Runs locally via `sentence-transformers` -- free, no API key needed, downloaded once from Hugging Face on first use |
 
 ## End-to-end flow

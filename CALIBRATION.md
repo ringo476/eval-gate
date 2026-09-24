@@ -4,16 +4,16 @@ An LLM-as-judge scorer is an unverified classifier until you check it
 against ground truth. This project treats that check as a first-class,
 versioned artifact rather than an assumption.
 
-**This project defaults the judge to `gpt-4o-mini`** -- the same cheap
+**This project defaults the judge to `gpt-6-luna`** -- the same cheap
 tier as the task model, purely for cost. That makes this calibration
 check load-bearing rather than a formality: a cheap judge grading a
 cheap model's output is exactly the setup where self-preference bias and
 missed subtle hallucinations are most likely to slip through unnoticed.
-Don't skip running this because "it's just the mini tier, how wrong
+Don't skip running this because "it's just the cheap tier, how wrong
 could it be" -- that's the assumption this file exists to replace with a
 number. If the numbers below come back weak, upgrade `HARNESS_JUDGE_MODEL`
-to `gpt-4o` for the judge role only; the task model can stay on the mini
-tier regardless.
+to `gpt-6-sol` for the judge role only; the task model can stay on
+`gpt-6-luna` regardless.
 
 ## What's being tested
 
@@ -71,8 +71,8 @@ that mode.)*
 | Judge model | MAE | Correlation | Agreement (+/-0.2) | Notes |
 |---|---|---|---|---|
 | mock (plumbing check only) | 0.493 | undefined (zero variance) | 35.7% | Expected -- mock cannot reason, this only proves the harness runs end to end |
-| gpt-4o-mini (default) | _TODO: run and fill in_ | | | The number that actually matters -- this is what the harness uses unless overridden |
-| gpt-4o (fallback, only if the mini row above is weak) | _TODO if needed_ | | | |
+| gpt-6-luna (default) | _TODO: run and fill in_ | | | The number that actually matters -- this is what the harness uses unless overridden |
+| gpt-6-sol (fallback, only if Luna's row above is weak) | _TODO if needed_ | | | |
 
 ## What this doesn't cover
 
@@ -87,12 +87,12 @@ set. It does not test:
   catch the obvious failure classes; they are a floor, not a ceiling.
 - Judge self-preference bias when the judge model is the same model as
   the one being graded. As of the current default, **this is a live risk,
-  not a hypothetical one**: judge and task model are both `gpt-4o-mini`.
+  not a hypothetical one**: judge and task model are both `gpt-6-luna`.
   The calibration set's `human_label`s are independent of any model's
   self-assessment, so a poor MAE/correlation here would be one real
   signal of this bias -- but 14 cases against one fixed candidate-answer
   set can't fully rule it out for arbitrary future outputs. If you
-  upgrade the judge to `gpt-4o` while keeping the mini tier as the task
+  upgrade the judge to `gpt-6-sol` while keeping Luna as the task
   model, this risk goes away by construction; the code doesn't yet
   enforce that as a hard rule, so it's on you to keep them different if
   this matters for your use case.

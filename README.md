@@ -155,9 +155,9 @@ To run against real models, copy `.env.example` to `.env`, fill in
 `OPENAI_API_KEY` (get one at [platform.openai.com/api-keys](https://platform.openai.com/api-keys)), then:
 
 ```bash
-python -m harness.cli run --task rag_fusion_qa --provider openai --model gpt-4o-mini --smoke 10
-python -m harness.cli run --task tool_agent_qa --provider openai --model gpt-4o-mini --smoke 10
-python -m harness.cli gate --task rag_fusion_qa --model gpt-4o-mini --min-score 0.75
+python -m harness.cli run --task rag_fusion_qa --provider openai --model gpt-6-luna --smoke 10
+python -m harness.cli run --task tool_agent_qa --provider openai --model gpt-6-luna --smoke 10
+python -m harness.cli gate --task rag_fusion_qa --model gpt-6-luna --min-score 0.75
 python -m harness.cli calibrate --provider openai
 ```
 
@@ -169,9 +169,9 @@ default for this project.
 
 | Role | Model | Why |
 |---|---|---|
-| Task model (default) | `gpt-4o-mini` | Cheapest viable OpenAI tier -- used for both iteration and the actual run by default |
-| Task model (optional comparison) | `gpt-4o` | Only added once the mini tier's results are in hand, to measure the cost/quality tradeoff on identical inputs -- not required to use this project |
-| Judge (default) | `gpt-4o-mini` | Cheapest option, same tier as the task model. This is *not* trusted blindly -- see [CALIBRATION.md](CALIBRATION.md): run `harness calibrate` and check the MAE/correlation before relying on it for gating. Bump to `gpt-4o` (via `HARNESS_JUDGE_MODEL`) only if calibration shows the mini tier isn't good enough, and only for the judge role. |
+| Task model (default) | `gpt-6-luna` | Cheapest current OpenAI tier -- used for both iteration and the actual run by default. (Verified live against platform.openai.com/docs/models on 2026-09-24; this provider's lineup moves fast, re-check before assuming this is still current.) |
+| Task model (optional comparison) | `gpt-6-sol` | Only added once Luna's results are in hand, to measure the cost/quality tradeoff on identical inputs -- not required to use this project |
+| Judge (default) | `gpt-6-luna` | Cheapest option, same tier as the task model. This is *not* trusted blindly -- see [CALIBRATION.md](CALIBRATION.md): run `harness calibrate` and check the MAE/correlation before relying on it for gating. Bump to `gpt-6-sol` (via `HARNESS_JUDGE_MODEL`) only if calibration shows Luna isn't good enough, and only for the judge role. |
 | Embeddings | `all-MiniLM-L6-v2` (local, via sentence-transformers) | Free, no API cost, run as many similarity checks as needed |
 
 ## Cost controls
@@ -190,7 +190,7 @@ Three independent mechanisms, not one:
   others, for fast/cheap iteration; reserve the full golden set for
   actual gating decisions.
 
-Rough per-full-run cost with the default all-`gpt-4o-mini` setup (25 RAG
+Rough per-full-run cost with the default all-`gpt-6-luna` setup (25 RAG
 cases + 10 agent cases, task + judge calls): **a few cents**. Verify
 current per-token pricing at
 [platform.openai.com/docs/pricing](https://platform.openai.com/docs/pricing) --
