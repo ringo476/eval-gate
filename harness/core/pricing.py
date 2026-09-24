@@ -16,7 +16,7 @@ PRICING_PER_MTOK = {
     # default (cheapest current tier); gpt-6-sol is the optional stronger
     # comparison tier. Verified against platform.openai.com/docs/models
     # on 2026-09-24 -- re-verify before trusting this for real budgeting,
-    # since this provider's lineup changes fast (see PROJECT_GUIDE.md).
+    # since this provider's lineup changes fast (see FLOW.md).
     "gpt-6-luna": {"input": 0.10, "output": 0.50},
     "gpt-6-sol": {"input": 2.00, "output": 10.00},
     "gpt-6-astra": {"input": 10.00, "output": 50.00},

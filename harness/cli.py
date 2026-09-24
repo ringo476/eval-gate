@@ -11,7 +11,7 @@ Every subcommand defaults to --provider mock unless --provider openai (or
 cannot accidentally spend money by copy-pasting a command from the
 README. OpenAI is the primary/documented provider for this project;
 Anthropic is supported by the same ModelProvider abstraction but isn't
-the default -- see PROJECT_GUIDE.md.
+the default -- see FLOW.md.
 """
 from __future__ import annotations
 
