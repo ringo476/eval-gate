@@ -73,15 +73,25 @@ def _safe_eval_node(node):
     raise CalculatorError(f"disallowed expression element: {type(node).__name__}")
 
 
+MAX_EXPRESSION_CHARS = 200  # model output is untrusted; bound the work a single call can cause
+
+
 def calculator(expression: str) -> str:
+    if not isinstance(expression, str):
+        return "error: expression must be a string"
+    if len(expression) > MAX_EXPRESSION_CHARS:
+        return f"error: expression too long (max {MAX_EXPRESSION_CHARS} characters)"
     try:
         tree = ast.parse(expression, mode="eval")
         result = _safe_eval_node(tree.body)
         return str(result)
     except CalculatorError as e:
         return f"error: {e}"
-    except (SyntaxError, ZeroDivisionError, TypeError, ValueError) as e:
-        return f"error: could not evaluate '{expression}' ({e})"
+    except RecursionError:
+        # deeply nested parentheses blow the parser/evaluator stack
+        return "error: expression nested too deeply"
+    except (SyntaxError, ZeroDivisionError, TypeError, ValueError, OverflowError, MemoryError) as e:
+        return f"error: could not evaluate '{expression[:60]}' ({e})"
 
 
 def kb_lookup(topic: str) -> str:

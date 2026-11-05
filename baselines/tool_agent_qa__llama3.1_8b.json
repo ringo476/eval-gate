@@ -1,0 +1,76 @@
+{
+  "cases": {
+    "ta-001": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-002": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-003": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-004": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9737
+    },
+    "ta-005": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9837
+    },
+    "ta-006": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9922
+    },
+    "ta-007": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-008": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-009": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-010": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    }
+  },
+  "created_at": "2026-11-05T14:54:19.725232+00:00",
+  "meta": {
+    "dataset_path": "golden/tool_agent_qa.jsonl",
+    "dataset_sha256": "aa4d81a42caf56db10754f941db53483c46a9fbe25399f0e2de04640f86c829b",
+    "git_sha": "e59d35bd72dee89e7e58171385c49b68eaa28262",
+    "harness_version": "0.2.0",
+    "judge_model": "gpt-oss:20b",
+    "judge_provider": "ollama",
+    "provider": "ollama",
+    "repeats": 1,
+    "temperature": 0.0
+  },
+  "model": "llama3.1:8b",
+  "schema": 1,
+  "source_run_id": "20261105T143128Z-d0ab0639",
+  "summary": {
+    "mean_score": 0.995,
+    "n_cases": 10,
+    "pass_rate": 1.0,
+    "repeats": 1
+  },
+  "task": "tool_agent_qa"
+}

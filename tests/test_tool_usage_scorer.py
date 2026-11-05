@@ -34,11 +34,19 @@ def test_partial_credit_for_multi_tool_case():
     assert result.score == 0.5
 
 
-def test_no_requirement_auto_passes():
-    case = make_case({"expected_tools": []})
-    trace = make_trace([])
-    result = ToolUsageScorer().score(case, trace)
+def test_absent_expected_tools_means_no_requirement():
+    case = make_case({})
+    result = ToolUsageScorer().score(case, make_trace([{"name": "calculator", "input": {}, "id": "1"}]))
     assert result.passed is True
+
+
+def test_explicit_empty_list_requires_that_no_tool_is_called():
+    case = make_case({"expected_tools": []})
+    assert ToolUsageScorer().score(case, make_trace([])).passed is True
+
+    forced = ToolUsageScorer().score(case, make_trace([{"name": "kb_lookup", "input": {}, "id": "1"}]))
+    assert forced.passed is False and forced.score == 0.0
+    assert forced.details["called_tools"] == ["kb_lookup"]
 
 
 def test_checks_argument_content_when_specified():

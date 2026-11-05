@@ -1,0 +1,151 @@
+{
+  "cases": {
+    "rf-001": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9471
+    },
+    "rf-002": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9629
+    },
+    "rf-003": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9617
+    },
+    "rf-004": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.8711
+    },
+    "rf-005": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9546
+    },
+    "rf-006": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9098
+    },
+    "rf-007": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.908
+    },
+    "rf-008": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9472
+    },
+    "rf-009": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.983
+    },
+    "rf-010": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9278
+    },
+    "rf-011": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.8979
+    },
+    "rf-012": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9017
+    },
+    "rf-013": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9445
+    },
+    "rf-014": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9551
+    },
+    "rf-015": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9459
+    },
+    "rf-016": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9463
+    },
+    "rf-017": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.953
+    },
+    "rf-018": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.8956
+    },
+    "rf-019": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9522
+    },
+    "rf-020": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9567
+    },
+    "rf-021": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9483
+    },
+    "rf-022": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.94
+    },
+    "rf-023": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "rf-024": {
+      "n_samples": 1,
+      "pass_rate": 0.0,
+      "score": 0.7444
+    },
+    "rf-025": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9437
+    }
+  },
+  "created_at": "2026-11-05T14:54:19.504755+00:00",
+  "meta": {
+    "dataset_path": "golden/rag_fusion_qa.jsonl",
+    "dataset_sha256": "d8ff936d9eb12f0399abc9e7b05e3116eb98f58b84b4be202c3cb4a9ad2233af",
+    "git_sha": "e59d35bd72dee89e7e58171385c49b68eaa28262",
+    "harness_version": "0.2.0",
+    "judge_model": "gpt-oss:20b",
+    "judge_provider": "ollama",
+    "provider": "ollama",
+    "repeats": 1,
+    "temperature": 0.0
+  },
+  "model": "llama3.1:8b",
+  "schema": 1,
+  "source_run_id": "20261105T143142Z-60055d67",
+  "summary": {
+    "mean_score": 0.9319,
+    "n_cases": 25,
+    "pass_rate": 0.96,
+    "repeats": 1
+  },
+  "task": "rag_fusion_qa"
+}

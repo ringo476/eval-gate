@@ -5,10 +5,14 @@ Estimates for cost-tracking purposes only -- verify against
 https://platform.openai.com/docs/pricing (OpenAI) or
 https://anthropic.com/pricing (Anthropic, kept for optional use) before
 relying on them for real budgeting. Kept in one place so a pricing
-update is a one-line change; if estimate_cost_usd() sees a model name
-that isn't listed here, it returns $0 rather than raising, so an unknown
-future model name doesn't crash a run over a cost-tracking miss -- check
-the logs if a real run reports suspiciously low cost.
+update is a one-line change.
+
+estimate_cost_usd() returns $0 for an unlisted model rather than raising.
+That is only safe for local models (genuinely free). For a paid provider an
+unlisted model would silently defeat the budget cap, so get_provider()
+refuses to build a budget-enforced provider for an unpriced model unless
+the caller explicitly opts in with --allow-unpriced. Local models (Ollama)
+are exempt: they cost nothing and are never wrapped in a budget guard.
 """
 
 PRICING_PER_MTOK = {
@@ -33,6 +37,10 @@ PRICING_PER_MTOK = {
 
     "mock": {"input": 0.0, "output": 0.0},
 }
+
+
+def is_priced(model: str) -> bool:
+    return model in PRICING_PER_MTOK
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:

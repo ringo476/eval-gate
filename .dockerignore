@@ -1,0 +1,17 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+*.egg-info
+build
+dist
+.env
+runs.db
+cache.db
+.harness_cache.db
+reports/*.md
+reports/*.json
+targets

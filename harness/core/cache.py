@@ -1,9 +1,15 @@
 """
 SQLite-backed response cache, keyed by a hash of (model, system, prompt,
-tools). Makes reruns free: if you re-run the same case against the same
-model after a crash, a prompt tweak on a *different* case, or just to
-regenerate a report, you don't pay for it twice. This is the single
+tools, variant). Makes reruns free: if you re-run the same case against
+the same model after a crash, a prompt tweak on a *different* case, or just
+to regenerate a report, you don't pay for it twice. This is the single
 biggest practical cost-control mechanism in the harness.
+
+`variant` is an opaque string folding in everything else that changes what
+the model would say: the sampling settings (temperature, max tokens) and
+the repeat-sample index. Without it, a cached temperature=0 answer would be
+served for a temperature=0.8 request, and --repeats N would replay the same
+cached sample N times instead of drawing N.
 """
 from __future__ import annotations
 
@@ -11,15 +17,17 @@ import hashlib
 import json
 import sqlite3
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
 
 from harness.core.models import ProviderResponse
 
+_RESPONSE_FIELDS = {f.name for f in fields(ProviderResponse)}
 
-def _cache_key(model: str, system: str | None, prompt: str, tools: list | None) -> str:
+
+def _cache_key(model: str, system: str | None, prompt: str, tools: list | None, variant: str = "") -> str:
     payload = json.dumps(
-        {"model": model, "system": system, "prompt": prompt, "tools": tools},
+        {"model": model, "system": system, "prompt": prompt, "tools": tools, "variant": variant},
         sort_keys=True,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -40,8 +48,10 @@ class ResponseCache:
         """)
         self._conn.commit()
 
-    def get(self, model: str, system: str | None, prompt: str, tools: list | None) -> ProviderResponse | None:
-        key = _cache_key(model, system, prompt, tools)
+    def get(
+        self, model: str, system: str | None, prompt: str, tools: list | None, variant: str = "",
+    ) -> ProviderResponse | None:
+        key = _cache_key(model, system, prompt, tools, variant)
         with self._lock:
             row = self._conn.execute(
                 "SELECT response_json FROM response_cache WHERE cache_key = ?", (key,)
@@ -49,10 +59,14 @@ class ResponseCache:
         if row is None:
             return None
         data = json.loads(row[0])
-        return ProviderResponse(**data)
+        # Tolerate rows written by an older/newer version of ProviderResponse.
+        return ProviderResponse(**{k: v for k, v in data.items() if k in _RESPONSE_FIELDS})
 
-    def put(self, model: str, system: str | None, prompt: str, tools: list | None, response: ProviderResponse) -> None:
-        key = _cache_key(model, system, prompt, tools)
+    def put(
+        self, model: str, system: str | None, prompt: str, tools: list | None,
+        response: ProviderResponse, variant: str = "",
+    ) -> None:
+        key = _cache_key(model, system, prompt, tools, variant)
         cacheable = asdict(response)
         # `raw` is normally either None (single-turn generate()) or a
         # JSON-safe list of content-block dicts (generate_messages(), so a

@@ -7,7 +7,13 @@ from pathlib import Path
 from harness.core.models import EvalCase
 
 
-def load_jsonl(path: str | Path) -> list[EvalCase]:
+def load_jsonl(path: str | Path, expected_task: str | None = None) -> list[EvalCase]:
+    """Load and strictly validate a golden dataset.
+
+    expected_task: if given, every row's `task` must equal it. Catches a
+    case copy-pasted into the wrong file, or `--dataset` pointed at another
+    task's data, before it silently runs through the wrong adapter.
+    """
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Golden dataset not found: {path}")
@@ -20,17 +26,42 @@ def load_jsonl(path: str | Path) -> list[EvalCase]:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
+            where = f"{path}:{line_no}"
             try:
                 row = json.loads(line)
             except json.JSONDecodeError as e:
-                raise ValueError(f"{path}:{line_no}: invalid JSON ({e})") from e
+                raise ValueError(f"{where}: invalid JSON ({e})") from e
+            if not isinstance(row, dict):
+                raise ValueError(f"{where}: each line must be a JSON object")
 
             for required in ("id", "task", "input", "expected"):
                 if required not in row:
-                    raise ValueError(f"{path}:{line_no}: missing required field '{required}'")
+                    raise ValueError(f"{where}: missing required field '{required}'")
+
+            if not isinstance(row["id"], str) or not row["id"].strip():
+                raise ValueError(f"{where}: 'id' must be a non-empty string")
+            if not isinstance(row["input"], dict):
+                raise ValueError(f"{where}: 'input' must be an object")
+            if not isinstance(row["expected"], dict):
+                raise ValueError(f"{where}: 'expected' must be an object")
+            skip = row["expected"].get("skip_scorers", [])
+            if not isinstance(skip, list) or not all(isinstance(s, str) for s in skip):
+                raise ValueError(f"{where}: 'expected.skip_scorers' must be a list of scorer names")
+            tags = row.get("tags", [])
+            if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+                raise ValueError(f"{where}: 'tags' must be a list of strings")
+            label = row.get("human_label")
+            if label is not None and (
+                isinstance(label, bool) or not isinstance(label, (int, float)) or not 0.0 <= label <= 1.0
+            ):
+                raise ValueError(f"{where}: 'human_label' must be a number between 0 and 1")
+            if expected_task is not None and row["task"] != expected_task:
+                raise ValueError(
+                    f"{where}: case '{row['id']}' has task '{row['task']}', expected '{expected_task}'"
+                )
 
             if row["id"] in seen_ids:
-                raise ValueError(f"{path}:{line_no}: duplicate case id '{row['id']}'")
+                raise ValueError(f"{where}: duplicate case id '{row['id']}'")
             seen_ids.add(row["id"])
 
             cases.append(EvalCase(
@@ -38,8 +69,8 @@ def load_jsonl(path: str | Path) -> list[EvalCase]:
                 task=row["task"],
                 input=row["input"],
                 expected=row["expected"],
-                tags=row.get("tags", []),
-                human_label=row.get("human_label"),
+                tags=tags,
+                human_label=label,
             ))
 
     if not cases:

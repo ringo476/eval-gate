@@ -8,7 +8,8 @@ vendored copy, because that logic is already model-agnostic. The two
 steps the original hardcodes to OpenAI -- query expansion and answer
 synthesis -- are reimplemented here against our own ModelProvider
 abstraction, with equivalent prompts, so the harness can run different
-Claude models through an otherwise-identical retrieval pipeline.
+models and providers (OpenAI, Anthropic, a local Ollama model) through an
+otherwise-identical retrieval pipeline.
 
 The vendored copy under targets/rag-fusion is never modified.
 """
@@ -21,6 +22,7 @@ import time
 from pathlib import Path
 
 from harness.adapters.base import Adapter
+from harness.core.budget import BudgetExceededError
 from harness.core.models import EvalCase, RunTrace
 from harness.core.pricing import estimate_cost_usd
 from harness.core.providers import ModelProvider
@@ -179,6 +181,8 @@ class RagFusionAdapter(Adapter):
                 cache_hit=fully_cached,
             )
 
+        except BudgetExceededError:
+            raise  # run-level condition: the Runner aborts the whole run, see runner.py
         except Exception as e:  # noqa: BLE001 -- adapters must never raise, see base.Adapter
             return RunTrace(
                 case_id=case.id,

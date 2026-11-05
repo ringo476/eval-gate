@@ -4,6 +4,14 @@ expects, with plausible arguments? Checked independently of whether the
 final answer sounds right -- a correct-sounding answer built by skipping
 the tool (i.e. the model just guessed) is exactly the failure mode this
 scorer exists to catch.
+
+`expected_tools` has three meanings, and the difference matters:
+
+  key absent            -> no requirement; the case doesn't constrain tools
+  ["calculator", ...]   -> each listed tool must be called
+  []  (explicit empty)  -> NO tool may be called. This is how a golden case
+                           asserts "the model must not force a tool call
+                           when neither tool applies".
 """
 from __future__ import annotations
 
@@ -15,11 +23,21 @@ class ToolUsageScorer(Scorer):
     name = "tool_usage"
 
     def score(self, case: EvalCase, trace: RunTrace) -> ScoreResult:
-        expected_tools = case.expected.get("expected_tools", [])
-        if not expected_tools:
+        if "expected_tools" not in case.expected:
             return ScoreResult(self.name, score=1.0, passed=True, details={"note": "no requirement"})
 
+        expected_tools = case.expected["expected_tools"] or []
         called_names = [tc["name"] for tc in trace.tool_calls]
+
+        if not expected_tools:
+            if not called_names:
+                return ScoreResult(self.name, score=1.0, passed=True)
+            return ScoreResult(
+                self.name, score=0.0, passed=False,
+                details={"expected_tools": [], "called_tools": called_names,
+                         "note": "case requires that no tool be called"},
+            )
+
         called_set = set(called_names)
         expected_set = set(expected_tools)
 

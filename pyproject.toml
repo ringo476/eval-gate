@@ -1,8 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ai-model-harness"
-version = "0.1.0"
-description = "Provider-agnostic eval harness for LLM-powered apps, with judge calibration, regression gating, and cost/budget controls."
+dynamic = ["version", "dependencies"]
+description = "Provider-agnostic eval harness for LLM-powered apps: regression gating against committed baselines, judge calibration, repeat-sampling for flakiness, cost/budget controls, and local-model support."
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[project.scripts]
+harness = "harness.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "harness.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["harness*"]
 
 [tool.ruff]
 line-length = 110
