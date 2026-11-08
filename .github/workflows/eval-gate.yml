@@ -1,10 +1,23 @@
 name: Eval Gate
 
-# This is the workflow that actually costs money (real OpenAI calls), so
-# it is NOT wired to run on every push -- that would be an unbounded,
-# unreviewed spend trigger on every commit, including from forks. Real
-# teams run this on a schedule (nightly) and/or manually before a
-# release, never on every PR, for exactly this reason.
+# This is the workflow that costs real money (OpenAI calls), so it is NOT
+# wired to run on every push -- that would be an unbounded, unreviewed spend
+# trigger on every commit, including from forks. It runs nightly and on
+# demand, with a hard per-job budget cap (HARNESS_MAX_COST_USD).
+#
+# What makes this a regression gate rather than a score printout:
+#   * it compares against a COMMITTED baseline (baselines/<task>__<model>.json),
+#     because a CI runner has no run history to diff against;
+#   * `gate --require-baseline` fails if that file is missing, so a gate that
+#     silently compares against nothing can't go green;
+#   * it refuses partial (--smoke), aborted, errored, or stale runs.
+#
+# One-time setup:
+#   1. Add the repo secret OPENAI_API_KEY (Settings -> Secrets and variables -> Actions).
+#      Until it exists this workflow skips with a warning instead of failing.
+#   2. Create the baselines: run this workflow once; it uploads a
+#      "candidate-baselines" artifact when no baseline is committed. Review it,
+#      drop the files into baselines/, and commit.
 on:
   workflow_dispatch:
     inputs:
@@ -12,56 +25,149 @@ on:
         description: "Model under test"
         default: "gpt-6-luna"
         required: false
+      judge_model:
+        description: "Judge model (blank = default). Prefer one different from the model under test."
+        default: ""
+        required: false
       min_score:
         description: "Minimum mean score required to pass"
         default: "0.75"
         required: false
-  # The nightly schedule is commented out deliberately: it requires an
-  # OPENAI_API_KEY repo secret (Settings -> Secrets and variables ->
-  # Actions) and an "eval" environment to exist first, or every run fails
-  # immediately and emails a failure notice for no reason. Uncomment the
-  # two lines below once both of those are set up.
-  # schedule:
-  #   - cron: "0 6 * * *"  # nightly at 06:00 UTC
+      calibrate:
+        description: "Calibrate the judge first (a few cents)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 6 * * *" # nightly at 06:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-gate
+  cancel-in-progress: false
 
 jobs:
   gate:
     runs-on: ubuntu-latest
-    environment: eval  # requires manual environment approval + the secret below
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [rag_fusion_qa, tool_agent_qa]
+    env:
+      MODEL: ${{ github.event.inputs.model || 'gpt-6-luna' }}
+      MIN_SCORE: ${{ github.event.inputs.min_score || '0.75' }}
+      HARNESS_JUDGE_MODEL: ${{ github.event.inputs.judge_model }}
+      HARNESS_MAX_COST_USD: "3.00"
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
+      - name: Check for the OPENAI_API_KEY secret
+        id: secret
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Eval gate skipped::OPENAI_API_KEY is not configured. Add it under Settings -> Secrets and variables -> Actions to enable this gate."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.secret.outputs.present == 'true'
 
       - uses: actions/setup-python@v5
+        if: steps.secret.outputs.present == 'true'
         with:
           python-version: "3.12"
           cache: "pip"
+          cache-dependency-path: requirements*.txt
+
+      - name: Cache embedding models
+        if: steps.secret.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/chroma
+          key: embedding-models-v2
 
       - name: Install dependencies
+        if: steps.secret.outputs.present == 'true'
         run: pip install -r requirements.txt
 
       - name: Vendor target app
+        if: steps.secret.outputs.present == 'true'
         run: bash scripts/setup_target.sh
 
+      - name: Calibrate the judge
+        if: steps.secret.outputs.present == 'true' && github.event.inputs.calibrate == 'true'
+        run: python -m harness.cli calibrate --provider openai
+
       - name: Run golden set
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          HARNESS_MAX_COST_USD: "3.00"
+        id: run
+        if: steps.secret.outputs.present == 'true'
+        # A non-zero exit here (errored samples, aborted run) is reported by the
+        # gate step below, so keep going to still publish the report.
+        continue-on-error: true
         run: >
           python -m harness.cli run
+          --task "${{ matrix.task }}"
           --provider openai
-          --model "${{ github.event.inputs.model || 'gpt-6-luna' }}"
+          --model "$MODEL"
 
-      - name: Gate on quality bar
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Locate committed baseline
+        id: baseline
+        if: steps.secret.outputs.present == 'true'
+        run: |
+          path=$(python -c "from harness.core.baseline import baseline_path; print(baseline_path('baselines', '${{ matrix.task }}', '$MODEL'))")
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          if [ -f "$path" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=No committed baseline::$path does not exist, so regressions cannot be detected. A candidate is attached to this run as an artifact."
+          fi
+
+      - name: Gate on quality bar and regressions
+        if: steps.secret.outputs.present == 'true'
         run: >
           python -m harness.cli gate
-          --model "${{ github.event.inputs.model || 'gpt-6-luna' }}"
-          --min-score "${{ github.event.inputs.min_score || '0.75' }}"
+          --task "${{ matrix.task }}"
+          --model "$MODEL"
+          --min-score "$MIN_SCORE"
+          ${{ steps.baseline.outputs.present == 'true' && '--require-baseline' || '' }}
 
-      - name: Upload report
-        if: always()
+      - name: Propose a baseline (none committed yet)
+        if: always() && steps.secret.outputs.present == 'true' && steps.baseline.outputs.present == 'false'
+        continue-on-error: true
+        run: python -m harness.cli baseline set --task "${{ matrix.task }}" --model "$MODEL" --out "candidate-baselines/$(basename '${{ steps.baseline.outputs.path }}')"
+
+      - name: Publish summary
+        if: always() && steps.secret.outputs.present == 'true'
+        run: |
+          latest=$(ls -t reports/2*.md 2>/dev/null | head -1 || true)
+          if [ -n "$latest" ]; then cat "$latest" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Build dashboard
+        if: always() && steps.secret.outputs.present == 'true'
+        continue-on-error: true
+        run: python -m harness.cli dashboard
+
+      - name: Upload reports
+        if: always() && steps.secret.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: eval-report
-          path: reports/*.md
+          name: eval-report-${{ matrix.task }}
+          path: |
+            reports/*.md
+            reports/*.json
+            reports/*.html
+          if-no-files-found: ignore
+
+      - name: Upload candidate baselines
+        if: always() && steps.secret.outputs.present == 'true' && steps.baseline.outputs.present == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-baselines-${{ matrix.task }}
+          path: candidate-baselines/
+          if-no-files-found: ignore

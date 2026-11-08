@@ -2,16 +2,25 @@ name: CI
 
 # Runs on every push/PR. Free -- uses --provider mock throughout, so this
 # workflow never needs an API key and never spends money. It proves the
-# harness's own code is correct; it does NOT tell you anything about the
-# target app's answer quality. That's what eval-gate.yml is for.
+# harness's own code is correct (lint, 200+ unit/e2e tests with a coverage
+# floor, smoke runs of both tasks); it does NOT tell you anything about a model's answer
+# quality. That's what eval-gate.yml is for.
 on:
   push:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -19,6 +28,17 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
+          cache-dependency-path: requirements*.txt
+
+      # Both embedding libraries download a model on first use; cache them so
+      # CI doesn't depend on those sites being reachable every run.
+      - name: Cache embedding models
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/chroma
+          key: embedding-models-v2
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
@@ -26,11 +46,14 @@ jobs:
       - name: Lint
         run: ruff check harness tests
 
-      - name: Unit tests (mock provider, no API key needed)
-        run: pytest -q
+      - name: Unit + end-to-end tests (mock provider, no API key needed)
+        run: pytest -q --cov --cov-report=term-missing
 
       - name: Vendor target app
         run: bash scripts/setup_target.sh
+
+      - name: Environment check
+        run: python -m harness.cli doctor
 
       - name: Smoke run -- RAG-fusion pipeline (mock model, $0)
         run: python -m harness.cli run --task rag_fusion_qa --provider mock --smoke 5
