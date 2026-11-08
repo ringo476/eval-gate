@@ -1,0 +1,201 @@
+{
+  "cases": {
+    "rf-001": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9612
+    },
+    "rf-002": {
+      "n_samples": 1,
+      "pass_rate": 0.0,
+      "score": 0.8933
+    },
+    "rf-003": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.971
+    },
+    "rf-004": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9271
+    },
+    "rf-005": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9821
+    },
+    "rf-006": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9853
+    },
+    "rf-007": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9773
+    },
+    "rf-008": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9727
+    },
+    "rf-009": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.989
+    },
+    "rf-010": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9696
+    },
+    "rf-011": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9738
+    },
+    "rf-012": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.982
+    },
+    "rf-013": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9684
+    },
+    "rf-014": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9861
+    },
+    "rf-015": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9719
+    },
+    "rf-016": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9843
+    },
+    "rf-017": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9638
+    },
+    "rf-018": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9629
+    },
+    "rf-019": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9866
+    },
+    "rf-020": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.982
+    },
+    "rf-021": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9758
+    },
+    "rf-022": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9815
+    },
+    "rf-023": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "rf-024": {
+      "n_samples": 1,
+      "pass_rate": 0.0,
+      "score": 0.6204
+    },
+    "rf-025": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9728
+    },
+    "rf-026": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9631
+    },
+    "rf-027": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9774
+    },
+    "rf-028": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "rf-029": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "rf-030": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "rf-031": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9762
+    },
+    "rf-032": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9808
+    },
+    "rf-033": {
+      "n_samples": 1,
+      "pass_rate": 0.0,
+      "score": 0.669
+    },
+    "rf-034": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9699
+    },
+    "rf-035": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.936
+    }
+  },
+  "created_at": "2026-11-06T08:24:09.237244+00:00",
+  "meta": {
+    "dataset_path": "golden/rag_fusion_qa.jsonl",
+    "dataset_sha256": "3702561c70add04354666e00ee2d6ed96c86c4fc786e6defb79f999752110430",
+    "git_sha": "4a3aa0efb2e81c59c321b116e156d87bef726844",
+    "harness_version": "0.3.0",
+    "judge_model": "gpt-oss:20b",
+    "judge_provider": "ollama",
+    "provider": "ollama",
+    "repeats": 1,
+    "temperature": 0.0
+  },
+  "model": "gemma2:9b",
+  "schema": 1,
+  "source_run_id": "20261106T082204Z-e6421d20",
+  "summary": {
+    "mean_score": 0.9547,
+    "n_cases": 35,
+    "pass_rate": 0.9143,
+    "repeats": 1
+  },
+  "task": "rag_fusion_qa"
+}

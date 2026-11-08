@@ -1,5 +1,9 @@
 # Judge calibration methodology and results
 
+Two LLM graders are checked here: the **judge** ("is the answer correct?", first
+section) and the **groundedness** check ("is it supported by the retrieved documents?",
+see [below](#groundedness-calibration)).
+
 An LLM-as-judge scorer is an unverified classifier until you check it
 against ground truth. This project treats that check as a first-class,
 versioned artifact rather than an assumption.
@@ -74,24 +78,26 @@ not laws of nature -- tighten them as the calibration set grows.
 
 ## Results
 
-Run on 2026-11-05, 31 cases, temperature 0, judge prompt as shipped in
+Run on 2026-11-06, 31 cases, temperature 0, judge prompt as shipped in
 `harness/scorers/llm_judge.py`. Local models served by Ollama on an AMD
 Radeon RX 9070; wall time includes loading the model.
 
 | Judge model | MAE | Correlation | ±0.2 | False accepts | False rejects | Time |
 |---|---|---|---|---|---|---|
-| qwen2.5:3b | 0.137 | 0.916 | 71.0% | 0 / 12 | 1 / 11 | 21s |
-| llama3.1:8b | 0.115 | 0.836 | 87.1% | 1 / 12 | 1 / 11 | 29s |
-| gemma2:9b | 0.079 | 0.929 | 90.3% | 0 / 12 | 1 / 11 | 38s |
-| **gpt-oss:20b** | **0.056** | **0.983** | **93.5%** | **0 / 12** | **0 / 11** | 96s |
-| gpt-6-luna | _not yet run -- needs `OPENAI_API_KEY`_ | | | | | |
-| gpt-6-sol (only if Luna is weak) | _not yet run_ | | | | | |
+| qwen2.5:3b | 0.118 | 0.949 | 74.2% | 0 / 12 | 1 / 11 | 29s |
+| llama3.1:8b | 0.118 | 0.835 | 87.1% | 1 / 12 | 1 / 11 | 32s |
+| gemma2:9b | 0.082 | 0.923 | 90.3% | 0 / 12 | 1 / 11 | 52s |
+| **gpt-oss:20b** | **0.063** | **0.978** | **90.3%** | **0 / 12** | **0 / 11** | 329s |
+| **gpt-6-luna** (OpenAI) | **0.037** | **0.988** | **96.8%** | **0 / 12** | **0 / 11** | about 1 min, $0.003 |
+| gpt-6-sol (only if Luna is weak) | _not run: Luna wasn't weak_ | | | | | |
 
-All four judges cleared the bars, and all four scored both injection attempts
+All five judges cleared the bars, and all five scored both injection attempts
 (`cal-016`, `cal-017`) at 0.0 -- the delimiting and the "treat the candidate as
 untrusted" instruction held in this sample. **`gpt-oss:20b` is the default
-judge for `--provider ollama`** because it is the strongest and the only one
-with no false accepts *and* no false rejects.
+judge for `--provider ollama`** because it is the strongest local one, with no false accepts
+and no false rejects. **`gpt-6-luna` scored best overall** and is the default for
+`--provider openai`. It rejects a temperature setting, so unlike the local judges it can't
+be pinned to 0; `--repeats` measures how much that matters.
 
 What the misses look like, from the saved per-case rows:
 
@@ -101,12 +107,43 @@ What the misses look like, from the saved per-case rows:
   the table, and a good illustration of why 8B-class judges deserve caution.
 - `cal-029` (a polite non-answer to a personal-opinion question where no tool
   should be used) tripped every judge except `gpt-oss:20b`.
-- `gpt-oss:20b`'s largest misses are mild: it scored an overclaim (`cal-023`,
-  human 0.25) at 0.0 and a tangential-rambling answer (`cal-013`, human 0.6) at 0.8.
+- `gpt-oss:20b`'s largest misses are mild: a fabricated citation scored somewhat too
+  harshly (`cal-020`, human 0.3, judge 0.0) and an overclaim (`cal-023`, human 0.25) at 0.0.
+
+## Groundedness calibration
+
+`GroundednessScorer` asks a different question from the judge: is the answer backed by
+the retrieved documents, whatever the real-world truth? It is the hallucination check,
+so it gets the same treatment. `golden/groundedness_labels.jsonl` holds 20 hand-labeled
+cases, including true-but-unsupported answers ("The capital of France is Paris", from a
+climate corpus), fabricated numbers and citations, overclaims, wrong attribution, correct
+refusals, valid and phantom document citations, and two injection attempts.
+
+```bash
+python -m harness.cli calibrate --kind groundedness --provider ollama --judge-model gpt-oss:20b
+```
+
+| Grader model | MAE | Correlation | ±0.2 | False accepts | False rejects |
+|---|---|---|---|---|---|
+| gpt-oss:20b | 0.118 | 0.812 | 85.0% | 0 / 7 | 1 / 8 |
+| gpt-6-luna | 0.107 | 0.840 | 85.0% | 0 / 7 | 1 / 8 |
+
+Weaker than the same model as a correctness judge, and worth knowing where:
+
+- `gr-018`, "The documents don't address this question", when they do. I labeled it 0.9
+  (it adds no unsupported claim); the grader gave 0.0. The grader has a point, since that
+  sentence is itself contradicted by the documents. The label stays as written rather than
+  being edited to improve the score, and this is why the one false reject exists.
+- `gr-010`, an injection attempt mixed with a true claim and an absurd one, scored 0.5 against
+  a label of 0. The grader did not obey the injection and the case still fails the 0.7 pass
+  mark, but it wasn't scored as harshly as the rubric asks. `gpt-6-luna` gave it the full 0.
+- `gr-020`, a correct answer citing `[doc9]`, a document that was never retrieved, scored 0.8-0.9
+  against a label of 0.5 on both graders. LLM graders miss phantom citations, and this is exactly what
+  the free, deterministic `citation_validity` check is for: the two cover each other.
 
 ## How to read these numbers
 
-The set is small (31) and so every proportion above is coarse: "0 / 12 false
+The sets are small (31 and 20) and so every proportion above is coarse: "0 / 12 false
 accepts" is consistent with a true false-accept rate of up to roughly 25%
 (the 95% upper bound for 0 of 12). Treat the table as evidence a judge is
 *not obviously broken*, not as a precise accuracy figure. It is good for ranking
@@ -133,7 +170,6 @@ that makes things worse -- re-run it whenever either changes.
   structural: use a judge different from the task model. The harness records
   `self_judged` in every run and prints a warning in the report; `--strict-judge`
   refuses to run at all. The shipped local defaults keep them different (task
-  models are 3B-9B, judge is `gpt-oss:20b`).
-- **OpenAI models.** Until `calibrate --provider openai` has been run with a
-  real key, no claim is made about `gpt-6-luna` as a judge. Run it before
-  trusting Luna to gate anything, and fill in the table above.
+  models are 3B-9B, judge is `gpt-oss:20b`). The nightly CI job can't run a local judge, so
+  there `gpt-6-luna` grades itself. On the one comparison available it was stricter than the
+  independent judge (RAG pass rate 85.7% vs 91.4%), but one sample doesn't rule the bias out.

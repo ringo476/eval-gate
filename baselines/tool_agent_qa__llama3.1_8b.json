@@ -18,17 +18,17 @@
     "ta-004": {
       "n_samples": 1,
       "pass_rate": 1.0,
-      "score": 0.9737
+      "score": 0.9649
     },
     "ta-005": {
       "n_samples": 1,
       "pass_rate": 1.0,
-      "score": 0.9837
+      "score": 0.9783
     },
     "ta-006": {
       "n_samples": 1,
       "pass_rate": 1.0,
-      "score": 0.9922
+      "score": 0.9896
     },
     "ta-007": {
       "n_samples": 1,
@@ -49,13 +49,53 @@
       "n_samples": 1,
       "pass_rate": 1.0,
       "score": 1.0
+    },
+    "ta-011": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-012": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-013": {
+      "n_samples": 1,
+      "pass_rate": 0.0,
+      "score": 0.25
+    },
+    "ta-014": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-015": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-016": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 1.0
+    },
+    "ta-017": {
+      "n_samples": 1,
+      "pass_rate": 0.0,
+      "score": 0.0
+    },
+    "ta-018": {
+      "n_samples": 1,
+      "pass_rate": 1.0,
+      "score": 0.9547
     }
   },
-  "created_at": "2026-11-05T14:54:19.725232+00:00",
+  "created_at": "2026-11-05T23:17:55.234235+00:00",
   "meta": {
     "dataset_path": "golden/tool_agent_qa.jsonl",
-    "dataset_sha256": "aa4d81a42caf56db10754f941db53483c46a9fbe25399f0e2de04640f86c829b",
-    "git_sha": "e59d35bd72dee89e7e58171385c49b68eaa28262",
+    "dataset_sha256": "60f2ba1efb2bc22b94f43c0b39cb5b84bee6c1f52aa0af1361793099196f66ac",
+    "git_sha": "4a3aa0efb2e81c59c321b116e156d87bef726844",
     "harness_version": "0.2.0",
     "judge_model": "gpt-oss:20b",
     "judge_provider": "ollama",
@@ -65,11 +105,11 @@
   },
   "model": "llama3.1:8b",
   "schema": 1,
-  "source_run_id": "20261105T143128Z-d0ab0639",
+  "source_run_id": "20261105T231018Z-559073ac",
   "summary": {
-    "mean_score": 0.995,
-    "n_cases": 10,
-    "pass_rate": 1.0,
+    "mean_score": 0.8965,
+    "n_cases": 18,
+    "pass_rate": 0.8889,
     "repeats": 1
   },
   "task": "tool_agent_qa"

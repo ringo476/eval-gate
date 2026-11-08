@@ -24,7 +24,7 @@ class ToolUsageScorer(Scorer):
 
     def score(self, case: EvalCase, trace: RunTrace) -> ScoreResult:
         if "expected_tools" not in case.expected:
-            return ScoreResult(self.name, score=1.0, passed=True, details={"note": "no requirement"})
+            return ScoreResult(self.name, score=1.0, passed=True, details={"note": "no requirement"}, applicable=False)
 
         expected_tools = case.expected["expected_tools"] or []
         called_names = [tc["name"] for tc in trace.tool_calls]

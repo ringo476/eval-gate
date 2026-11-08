@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
 from harness.core.diff import DiffResult
 from harness.core.models import RunSummary
-from harness.core.stats import percentile, wilson_interval
+from harness.core.retrieval_metrics import DEFAULT_KS, aggregate_retrieval
+from harness.core.stats import mcnemar_exact, percentile, wilson_interval
 
 
 def _cell(text: Any) -> str:
@@ -24,6 +26,8 @@ def _scorer_stats(summary: RunSummary) -> dict[str, dict[str, float]]:
     stats: dict[str, dict[str, float]] = {}
     for cr in summary.case_results:
         for s in cr.scores:
+            if not s.applicable:
+                continue
             entry = stats.setdefault(s.scorer_name, {"passed": 0, "total": 0, "score_sum": 0.0})
             entry["total"] += 1
             entry["passed"] += int(s.passed)
@@ -57,10 +61,14 @@ def render_run_report(summary: RunSummary, diff: DiffResult | None = None) -> st
         f"- **Cases:** {len(cases)}" + (f" x {summary.repeats} samples" if summary.repeats > 1 else ""),
         f"- **Pass rate:** {summary.pass_rate:.1%}  (95% CI {lo:.0%}-{hi:.0%}, n={len(cases)})",
         f"- **Mean score:** {summary.mean_score:.3f}",
-        f"- **Total cost:** ${summary.total_cost_usd:.4f}",
+        f"- **Total cost:** ${summary.total_cost_usd:.4f} (of which grading ${summary.scoring_cost_usd:.4f})",
         f"- **Latency (uncached) p50 / p95:** {p50 / 1000:.1f}s / {p95 / 1000:.1f}s",
         f"- **Errors:** {summary.error_count}",
     ]
+    cached = sum(1 for c in summary.case_results if c.trace.cache_hit)
+    if cached:
+        lines.append(f"- **Replayed from cache:** {cached} of {len(summary.case_results)} samples"
+                     + (" (use --no-cache to re-test the model itself)" if cached == len(summary.case_results) else ""))
     if summary.flaky_cases:
         lines.append(f"- **Flaky cases ({len(summary.flaky_cases)}):** {', '.join(summary.flaky_cases)}")
     if meta.get("temperature") is not None:
@@ -121,6 +129,17 @@ def render_run_report(summary: RunSummary, diff: DiffResult | None = None) -> st
             lines.append(f"| {name} | {s['passed']}/{s['total']} | {s['pass_rate']:.0%} | {s['mean_score']:.2f} |")
         lines.append("")
 
+    retrieval = aggregate_retrieval(summary.case_results)
+    if retrieval:
+        lines += [
+            f"## Retrieval quality (mean of {retrieval['n']} cases with a known right answer)", "",
+            "| k | Recall@k | Precision@k | nDCG@k |", "|---|---|---|---|",
+        ]
+        for k in DEFAULT_KS:
+            lines.append(f"| {k} | {retrieval[f'recall@{k}']:.3f} | {retrieval[f'precision@{k}']:.3f} | "
+                         f"{retrieval[f'ndcg@{k}']:.3f} |")
+        lines += ["", f"MRR: {retrieval['mrr']:.3f}", ""]
+
     multi = summary.repeats > 1
     header = "| Case | Status | " + ("Pass rate | " if multi else "") + "Score | Cost | Latency | Error |"
     sep = "|---|---|" + ("---|" if multi else "") + "---|---|---|---|"
@@ -172,12 +191,14 @@ def summary_to_dict(summary: RunSummary, diff: DiffResult | None = None) -> dict
             "pass_rate_ci95": [lo, hi],
             "mean_score": summary.mean_score,
             "total_cost_usd": summary.total_cost_usd,
+            "scoring_cost_usd": summary.scoring_cost_usd,
             "latency_p50_ms": p50,
             "latency_p95_ms": p95,
             "error_count": summary.error_count,
             "flaky_cases": summary.flaky_cases,
         },
         "by_scorer": _scorer_stats(summary),
+        "retrieval": aggregate_retrieval(summary.case_results),
         "cases": [
             {
                 "id": c.case.id, "status": c.status, "pass_rate": c.pass_rate, "n_samples": c.n_samples,
@@ -201,6 +222,14 @@ def write_report(summary: RunSummary, diff: DiffResult | None, out_dir: str = "r
     return md_path
 
 
+def paired_disagreements(a: dict[str, dict[str, Any]], b: dict[str, dict[str, Any]]) -> tuple[int, int]:
+    """(cases only A passes, cases only B passes), over cases both runs have."""
+    shared = set(a) & set(b)
+    only_a = sum(1 for c in shared if a[c]["passed"] and not b[c]["passed"])
+    only_b = sum(1 for c in shared if b[c]["passed"] and not a[c]["passed"])
+    return only_a, only_b
+
+
 def render_comparison(task: str, runs: list[dict[str, Any]], results: dict[str, dict[str, dict[str, Any]]]) -> str:
     """Side-by-side view of several models on the same task.
 
@@ -222,9 +251,31 @@ def render_comparison(task: str, runs: list[dict[str, Any]], results: dict[str, 
             f"${r['total_cost_usd']:.4f} | {r['error_count']} | {judge}{flag} | `{r['run_id']}` |"
         )
     lines.append("")
-    lines.append("_With a small golden set the confidence intervals are wide: differences smaller than the "
-                 "interval overlap are not evidence one model is better._")
-    lines.append("")
+
+    judges = {r["meta"].get("judge_model") for r in runs}
+    if len(judges) > 1:
+        lines += [f"> **Not like-for-like:** these runs used different judges ({', '.join(sorted(map(str, judges)))}), "
+                  "which changes scores on its own.", ""]
+
+    if any(r["meta"].get("retrieval") for r in runs):
+        lines += ["## Retrieval quality", "", "| Model | Recall@1 | Recall@3 | Recall@5 | Precision@3 | nDCG@3 | MRR |",
+                  "|---|---|---|---|---|---|---|"]
+        for r in runs:
+            m = r["meta"].get("retrieval")
+            if m:
+                lines.append(f"| {r['model']} | {m['recall@1']:.3f} | {m['recall@3']:.3f} | {m['recall@5']:.3f} | "
+                             f"{m['precision@3']:.3f} | {m['ndcg@3']:.3f} | {m['mrr']:.3f} |")
+        lines.append("")
+
+    if len(runs) > 1:
+        lines += ["## Is the difference real? (paired test on shared cases)", "",
+                  "| Models | Only first passes | Only second passes | p-value | Reading |", "|---|---|---|---|---|"]
+        for a, b in combinations(runs, 2):
+            only_a, only_b = paired_disagreements(results[a["run_id"]], results[b["run_id"]])
+            p = mcnemar_exact(only_a, only_b)
+            reading = "unlikely to be chance" if p < 0.05 else "could be chance"
+            lines.append(f"| {a['model']} vs {b['model']} | {only_a} | {only_b} | {p:.3f} | {reading} |")
+        lines += ["", "_Exact McNemar test: if two models were equally good, each disagreement would be a coin flip._", ""]
 
     all_cases = sorted({cid for res in results.values() for cid in res})
     disagree = []

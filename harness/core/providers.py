@@ -252,6 +252,7 @@ class OpenAIProvider(_NetworkProvider):
         self._retryable = (openai.RateLimitError, openai.APIConnectionError, openai.InternalServerError)
         self._BadRequestError = openai.BadRequestError
         self._send_temperature = settings.temperature is not None
+        self._tools_need_no_reasoning = False
 
     @staticmethod
     def _convert_tools(tools: list[dict] | None):
@@ -278,6 +279,13 @@ class OpenAIProvider(_NetworkProvider):
         remember the answer for later calls, and report whether we changed
         anything worth retrying."""
         msg = error_text.lower()
+        # Reasoning models can refuse function tools on chat completions unless
+        # reasoning is switched off for that call (found on gpt-6-luna).
+        if "reasoning_effort" in msg and "tools" in kwargs and "reasoning_effort" not in kwargs:
+            logger.warning("model %s needs reasoning_effort='none' with tools; retrying with it", self.name)
+            self._tools_need_no_reasoning = True
+            kwargs["reasoning_effort"] = "none"
+            return True
         if "temperature" in msg and "temperature" in kwargs:
             logger.warning("model %s rejected temperature; retrying without it", self.name)
             self._send_temperature = False
@@ -310,6 +318,8 @@ class OpenAIProvider(_NetworkProvider):
             converted_tools = self._convert_tools(tools)
             if converted_tools:
                 kwargs["tools"] = converted_tools
+                if self._tools_need_no_reasoning:
+                    kwargs["reasoning_effort"] = "none"
 
             resp = self._create(kwargs)
             latency_ms = (time.perf_counter() - start) * 1000
@@ -452,9 +462,13 @@ class BudgetEnforcingProvider(ModelProvider):
             self.name, worst_case_input_tokens, self.settings.max_output_tokens
         )
         self._budget.check_and_reserve(worst_case_cost)
-        response = call_fn()
+        try:
+            response = call_fn()
+        except BaseException:
+            self._budget.release(worst_case_cost)
+            raise
         actual_cost = self._estimate_cost_fn(self.name, response.input_tokens, response.output_tokens)
-        self._budget.record(actual_cost)
+        self._budget.record(actual_cost, reservation=worst_case_cost)
         return response
 
     def generate(self, prompt, system=None, tools=None) -> ProviderResponse:

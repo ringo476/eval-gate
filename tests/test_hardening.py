@@ -181,4 +181,6 @@ def test_comparison_lists_only_the_disagreements_and_warns_about_noise():
     text = render_comparison("task", runs, results)
     assert "disagree (2 of 4)" in text
     assert "| b |" in text and "| c |" in text and "| a |" not in text
-    assert "self-judged" in text and "interval" in text
+    assert "self-judged" in text
+    # gpt passes 2 cases local fails, local passes none that gpt fails: 2 coin flips, p = 0.5
+    assert "| gpt vs local | 2 | 0 | 0.500 | could be chance |" in text

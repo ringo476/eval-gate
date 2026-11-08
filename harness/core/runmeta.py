@@ -16,11 +16,9 @@ from harness import __version__
 
 
 def file_sha256(path: str | Path) -> str:
-    h = hashlib.sha256()
-    with Path(path).open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    """Fingerprint of a text file's content. Line endings are normalized so
+    the same dataset hashes the same on Windows (CRLF checkout) and in CI (LF)."""
+    return hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def _git(*args: str) -> str | None:

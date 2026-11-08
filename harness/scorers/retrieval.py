@@ -22,7 +22,8 @@ class RetrievalHitRateScorer(Scorer):
     def score(self, case: EvalCase, trace: RunTrace) -> ScoreResult:
         expected_ids = set(case.expected.get("relevant_doc_ids", []))
         if not expected_ids:
-            return ScoreResult(self.name, score=1.0, passed=True, details={"note": "no retrieval requirement"})
+            return ScoreResult(self.name, score=1.0, passed=True, details={"note": "no retrieval requirement"},
+                               applicable=False)
 
         retrieved_ids = {c["source"] for c in trace.retrieved_chunks}
         hits = expected_ids & retrieved_ids

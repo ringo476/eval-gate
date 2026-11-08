@@ -14,6 +14,9 @@ cache.db
 .harness_cache.db
 reports/*.md
 reports/*.json
+reports/*.html
+candidate-baselines/
+.coverage
 !reports/.gitkeep
 targets/
 

@@ -126,7 +126,9 @@ This is the main command. Here is *everything* that happens, in order.
    1. Generates a `run_id` via `new_run_id()`.
    2. Submits one `Runner._run_one(case, sample_idx)` per (case, sample) to a
       `ThreadPoolExecutor(max_workers)`.
-   3. `_run_one` obtains **`self._provider_for(sample_idx)`** →
+   3. An adapter exception that escapes (say, a case missing its `query`) becomes
+      an error trace for that one case. It never takes down the run.
+      `_run_one` obtains **`self._provider_for(sample_idx)`** →
       `provider.scoped(sample_idx)`. Only `CachingProvider` does anything with
       it: it returns a view whose cache key includes the sample index, so
       sample 2 is a fresh draw rather than a replay of sample 0.
@@ -134,14 +136,18 @@ This is the main command. Here is *everything* that happens, in order.
       app runs (traces 4 and 5 below).
    5. If `trace.error` is set, returns a `CaseResult` with no scores — no
       scorer runs on a failed sample.
-   6. Otherwise calls **`scorer.score(case, trace)`** for every scorer,
-      catching any exception per-scorer (a broken scorer becomes a failing
-      `ScoreResult`), **except `BudgetExceededError`**, which propagates.
-   7. Back in `run()`, completed futures are collected. If any raises
-      `BudgetExceededError`, the run is **aborted**: every pending future is
-      cancelled, `abort_reason` is recorded, and collection continues for the
-      work already in flight. (Without this, every remaining case would burn
-      time failing the same way.)
+   6. Otherwise calls **`scorer.score(case, trace)`** for every scorer the case
+      didn't opt out of with `expected.skip_scorers`, catching any exception
+      per-scorer (a broken scorer becomes a failing `ScoreResult`), **except
+      `BudgetExceededError`**, which propagates. If the trace has a `failure_note`
+      (the agent ran out of steps) a failing `completion` result is added: that is
+      the model failing the task, so it is a failed check and not an error.
+   7. Back in `run()`, completed futures are collected. The run is **aborted**
+      (every pending future cancelled, `abort_reason` recorded, work already in
+      flight still collected) on `BudgetExceededError`, or when
+      `--max-consecutive-errors` samples in a row have errored, because a bad key
+      or a dead server would fail every remaining case the same way. Ctrl-C also
+      cancels queued work, so it stops spending instead of finishing the queue.
    8. Results are sorted into `(dataset order, sample_idx)` — thread
       completion order isn't deterministic — and returned as a `RunSummary`
       (`aborted=True` if the budget tripped).
@@ -154,10 +160,14 @@ This is the main command. Here is *everything* that happens, in order.
       the in-memory ChromaDB collection (concurrent construction crashed in
       testing).
    3. **`provider.generate(...)`** with `QUERY_EXPANSION_SYSTEM` — model call 1.
-   4. **`_clean_query_lines(...)`** strips numbering/bullets.
+   4. **`_clean_query_lines(...)`** strips numbering/bullets, and the list is cut
+      to `MAX_EXPANDED_QUERIES` (4) so a chatty reply can't fan out into dozens of
+      searches.
    5. Under `self._collection_lock`: **`target.vector_search(...)`** per query,
       **`target.reciprocal_rank_fusion(...)`** (both vendored, unmodified),
-      then `collection.get(ids=...)` for the top-`k` fused documents.
+      then `collection.get(ids=...)` for the top-`k` fused documents, restoring
+      fused order. The whole ranking goes in `RunTrace.retrieval_ranking` for the
+      retrieval metrics.
    6. **`provider.generate(...)`** with `SYNTHESIS_SYSTEM` — model call 2.
    7. **`_leg_cost(...)`** ×2 (0 for cache hits).
    8. Returns a `RunTrace`. Any exception becomes an error trace — **except
@@ -172,7 +182,7 @@ This is the main command. Here is *everything* that happens, in order.
       **`provider.build_assistant_message(response)`** is appended, each tool
       call is run via **`execute_tool(...)`**, and
       **`provider.build_tool_result_messages(executed)`** extends `messages`.
-   3. Exhausting `MAX_STEPS` returns an explicit error trace.
+   3. Exhausting `MAX_STEPS` returns a trace with `failure_note` set.
    4. Same exception policy as the RAG adapter.
 
 6. **Inside `execute_tool(name, tool_input)`** (`harness/adapters/tools.py`):
@@ -186,7 +196,8 @@ This is the main command. Here is *everything* that happens, in order.
 7. **Scoring** — what each scorer does with a trace is in Part 3
    (`harness/scorers/*`). `LLMJudgeScorer.score` builds a delimited prompt via
    `build_judge_prompt`, calls the (temperature-0) judge, parses with
-   `_extract_json`, and clamps the score to 0–10.
+   `_extract_json`, and clamps the score to 0–10. `GroundednessScorer` does the same
+   with the retrieved documents in place of a reference answer.
 
 ### `python -m harness.cli gate --task rag_fusion_qa --model gpt-6-luna --min-score 0.75 --require-baseline`
 
@@ -229,13 +240,24 @@ improvements. Exit 1 if any regression, 2 if no run exists.
 `main()` → `cmd_compare(args)`: for each model, **`store.latest_run_id(...,
 full_only=True)`**, `get_run`, `case_results_for_run`. Exit 2 listing any model
 with no full run. Otherwise **`render_comparison(task, runs, results)`** prints a
-table (pass rate with 95% interval, mean score, cost, errors, judge, run id) and
-the cases where models disagree; `--out` also writes it to a file.
+table (pass rate with 95% interval, mean score, cost, errors, judge, run id),
+retrieval metrics, an exact paired test for each pair of models
+(**`paired_disagreements`** + **`mcnemar_exact`**), and the cases where models
+disagree; `--out` also writes it to a file. It warns if the runs used different judges.
+
+### `python -m harness.cli dashboard`
+
+`main()` → `cmd_dashboard(args)` → **`write_dashboard(store, out, baselines_dir)`**:
+**`collect_dashboard_data`** takes each model's latest full run, its history on the
+same dataset, and its baseline diff; **`render_dashboard`** writes one self-contained
+HTML page. All run text passes through `html.escape`.
 
 ### `python -m harness.cli calibrate --provider ollama --judge-model gpt-oss:20b --repeats 3`
 
-Independent of the target apps — no adapter, retrieval or tools. It tests the
-judge alone.
+Independent of the target apps — no adapter, retrieval or tools. It tests an LLM
+grader alone. `--kind judge` (default) tests correctness grading against
+`golden/calibration_labels.jsonl`; `--kind groundedness` tests the hallucination check
+against `golden/groundedness_labels.jsonl`.
 
 1. `main()` → `cmd_calibrate(args)`.
 2. `load_config()`, judge model (`--judge-model` / `HARNESS_JUDGE_MODEL` /
@@ -269,6 +291,13 @@ package, config validity, that the vendored target exists, that each task's
 golden set loads (counts cases and pinned cases), which baselines exist, which
 API keys are set (never prints values), and whether Ollama is reachable and
 which models it has. Exit 3 if a required check fails.
+
+### `python scripts/demo_regression.py [--change careless|careful]`
+
+Overwrites `rag_fusion.SYNTHESIS_SYSTEM` in memory, points the run history and reports at
+a temporary directory, then calls `cli.main` for `run` and `gate --require-baseline`. No
+files in the repo change, and the shared response cache means answers that didn't change
+are not recomputed.
 
 ---
 
@@ -310,11 +339,16 @@ Pure dataclasses plus computed properties:
 - **`EvalCase`** — one golden row. `.is_pinned` — `"pinned"` in `.tags`.
 - **`ProviderResponse`** — one model call's result; `finish_reason == "length"`
   means the output was truncated.
-- **`RunTrace`** — what an adapter returns for one sample.
-- **`ScoreResult`** — one scorer's verdict.
+- **`RunTrace`** — what an adapter returns for one sample. `error` means the run
+  broke (network, crash); `failure_note` means it finished but the app misbehaved in
+  a way scorers can't see; `retrieval_ranking` is every retrieved doc id, best first.
+- **`ScoreResult`** — one scorer's verdict (see below).
+- **`ScoreResult`** also carries `applicable` (false when the case had nothing for
+  this scorer to check, so it passes but stays out of averages) and `cost_usd`
+  (what an LLM grader spent).
 - **`CaseResult`** — **one sample** of one case (`sample_idx`).
-  `.aggregate_score` (mean of scores; 0 if errored) and `.passed` (all scorers
-  passed and no error).
+  `.aggregate_score` (mean of *applicable* scores; 0 if errored), `.passed` (all
+  scorers passed and no error), `.scoring_cost_usd`, `.total_cost_usd`.
 - **`CaseAggregate`** — all samples of a case. `.n_samples`, `.n_passed`,
   `.pass_rate`, `.passed` (**strict majority** of samples, so one sample behaves
   like before), `.status` (`pass` / `fail` / `flaky`), `.mean_score`,
@@ -331,13 +365,35 @@ Pure dataclasses plus computed properties:
 - **`wilson_interval(successes, total, z=1.96)`** — 95% Wilson score interval;
   well-behaved at 0% / 100% and small n.
 - **`intervals_overlap(a, b)`**.
+- **`mcnemar_exact(only_a, only_b)`** — exact paired test for two models on the same
+  cases. Only disagreements carry information; if the models were equally good each
+  would be a coin flip.
 - **`percentile(values, pct)`** — linear interpolation; 0 for empty.
 - **`pearson(xs, ys)`** — correlation, or `None` when undefined (n < 2 or zero
   variance) instead of NaN.
 
+### `harness/core/retrieval_metrics.py`
+
+- **`recall_at_k`**, **`precision_at_k`**, **`reciprocal_rank`**, **`ndcg_at_k`** —
+  standard definitions; `ranking` is best-first, `relevant` is the human-marked set.
+- **`retrieval_metrics(ranking, relevant, ks=(1, 3, 5))`** — all of them for one query.
+- **`aggregate_retrieval(case_results)`** — means over samples with both a ranking and
+  a known right answer; `None` if there are none (e.g. the agent task).
+
+### `harness/core/dashboard.py`
+
+- **`collect_dashboard_data(store, baselines_dir, include_mock=False)`** — per task, each
+  model's latest full run, same-dataset history and baseline diff. Mock runs are hidden
+  by default because their scores mean nothing.
+- **`render_dashboard(tasks, generated_at=None)`** — the HTML page: per-model table with
+  pass-rate bars and trend, retrieval table, a case-by-model matrix (status always has an
+  icon and text, not just color), and "what failed and why".
+- **`write_dashboard(store, out_path, baselines_dir, include_mock=False)`**.
+
 ### `harness/core/runmeta.py`
 
-- **`file_sha256(path)`** — streaming SHA-256.
+- **`file_sha256(path)`** — SHA-256 of a text file with line endings normalized, so the
+  same dataset hashes the same on Windows and in CI.
 - **`_git(*args)`** — run git, `None` on any failure (not a repo, git missing).
 - **`git_info()`** — `git_sha`, `git_branch`, `git_dirty`.
 - **`collect_meta(**run_settings)`** — harness version + Python version + git
@@ -354,11 +410,14 @@ Pure dataclasses plus computed properties:
 ### `harness/core/budget.py`
 
 - **`BudgetExceededError`**.
-- **`BudgetGuard.__init__(max_cost_usd)`** — cap, `_spent = 0`, a lock.
-- **`BudgetGuard.spent`** — thread-safe read.
+- **`BudgetGuard.__init__(max_cost_usd)`** — cap, `_spent = 0`, `_reserved = 0`, a lock.
+- **`BudgetGuard.spent`**, **`.reserved`** — thread-safe reads.
 - **`BudgetGuard.check_and_reserve(estimated_cost)`** — raises if
-  `spent + estimate > cap`. A check, not a two-phase commit.
-- **`BudgetGuard.record(actual_cost)`** — adds the real cost after the call.
+  `spent + reserved + estimate > cap`, otherwise holds the estimate. A real
+  reservation: calls run in parallel, and a check on money already spent would let
+  every in-flight worker pass at once and overshoot.
+- **`BudgetGuard.release(reservation)`** — the call failed; give it back.
+- **`BudgetGuard.record(actual_cost, reservation=0.0)`** — swap the hold for the real cost.
 
 ### `harness/core/cache.py`
 
@@ -412,7 +471,8 @@ Pure dataclasses plus computed properties:
 - **`OpenAIProvider`** — same shape for the chat-completions format. Retries
   rate limits, connection errors/timeouts and 5xx. **`_adapt_kwargs`** adapts
   once, and remembers, when a model rejects `temperature` or the token
-  parameter (`max_completion_tokens` ↔ `max_tokens`). **`_create`** applies it.
+  parameter (`max_completion_tokens` ↔ `max_tokens`), or refuses function tools until
+  `reasoning_effort` is `none`. **`_create`** applies it.
   **`_call`** parses tool calls (malformed JSON arguments become `{}`),
   estimates token usage if the server omits it, and warns on
   `finish_reason == "length"`. `build_tool_result_messages` returns one
@@ -509,7 +569,9 @@ Pure dataclasses plus computed properties:
   ≥ `min_pass_rate` if given); every pinned case evaluated and passing **every**
   sample; baseline present if `require_baseline` (and a *committed* one, not
   just a previous run); no regressions; no baseline case missing from a full
-  run; flakier-than-baseline cases warn (or fail with `fail_on_degraded`).
+  run; flakier-than-baseline cases warn (or fail with `fail_on_degraded`). Also warns
+  when the judge or temperature differs from the baseline's (not like-for-like), and
+  when every answer was replayed from cache (the model itself wasn't re-tested).
 
 ### `harness/core/report.py`
 
@@ -531,8 +593,19 @@ Pure dataclasses plus computed properties:
 
 ### `harness/scorers/contains.py`
 
-- **`ContainsScorer.score`** — every `expected.answer_contains` substring must
-  appear (case-insensitive); score `1 − missing/required`; empty list auto-passes.
+- **`normalize_text(text)`** — ignores case, spacing, hyphens, thousands separators,
+  subscripts and stray spaces inside decimals, so harmless formatting isn't a false alarm.
+- **`ContainsScorer.score`** — each `expected.answer_contains` entry (a string, or a list
+  of acceptable alternatives) must appear; score `1 − missing/required`; empty list is
+  not applicable.
+
+### `harness/scorers/citations.py`
+
+- **`extract_citations(text)`** — literal `docN` ids only ("Document 1" usually means a
+  position, so it's ignored).
+- **`CitationValidityScorer.score`** — every cited id must have been retrieved. A citation
+  to a document the model never saw is a fabricated source. Free; no citations means
+  not applicable.
 
 ### `harness/scorers/retrieval.py`
 
@@ -560,10 +633,15 @@ Pure dataclasses plus computed properties:
 - **`_neutralise(text)`** — removes the delimiter tags from untrusted text.
 - **`build_judge_prompt(question, reference, candidate)`** — three
   XML-delimited fields.
-- **`LLMJudgeScorer.__init__(judge_provider, pass_threshold=0.7)`**,
-  **`.score`** — empty candidate auto-fails without calling the judge; an
-  unparseable or non-numeric reply is a failing result with an `error` detail
-  (distinguishable from a genuine low score); the score is clamped to [0, 10].
+- **`GROUNDEDNESS_SYSTEM_PROMPT`**, **`build_groundedness_prompt(question, documents, candidate)`**
+  — judges support by the retrieved documents only, ignoring outside knowledge.
+- **`_LLMGrader._grade(prompt, system)`** — shared by both graders: calls the model,
+  records the cost, parses and clamps. An unparseable or non-numeric reply is a failing
+  result with an `error` detail (distinguishable from a genuine low score).
+- **`LLMJudgeScorer.score`** — "is it correct?", against the reference answer. An empty
+  candidate fails without calling the judge.
+- **`GroundednessScorer.score`** — "is it supported?", against the retrieved documents.
+  Needs no reference answer; with no documents it is not applicable.
 - **`_extract_json(text)`** — scans every `{` and returns the **last** JSON
   object with a `score` key, so thinking-out-loud replies, code fences and stray
   braces parse.
@@ -606,7 +684,7 @@ Pure dataclasses plus computed properties:
 - **`_make_provider(...)`** — key check, Ollama preflight, `get_provider`.
 - **`_resolve_judge(...)`**, **`_baseline_kwargs(...)`**.
 - **`cmd_run`**, **`cmd_diff`**, **`cmd_gate`**, **`cmd_baseline_set`**,
-  **`cmd_baseline_show`**, **`cmd_compare`**, **`cmd_calibrate`**,
+  **`cmd_baseline_show`**, **`cmd_compare`**, **`cmd_dashboard`**, **`cmd_calibrate`**,
   **`cmd_history`**, **`cmd_doctor`** — one per subcommand; each traced in
   Part 2.
 - **`build_parser()`** — shared parent parsers (`common`: task/model;

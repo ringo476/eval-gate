@@ -47,6 +47,12 @@ def load_jsonl(path: str | Path, expected_task: str | None = None) -> list[EvalC
             skip = row["expected"].get("skip_scorers", [])
             if not isinstance(skip, list) or not all(isinstance(s, str) for s in skip):
                 raise ValueError(f"{where}: 'expected.skip_scorers' must be a list of scorer names")
+            for entry in row["expected"].get("answer_contains", []):
+                alternatives = entry if isinstance(entry, list) else [entry]
+                if not alternatives or not all(isinstance(a, str) and a.strip() for a in alternatives):
+                    raise ValueError(
+                        f"{where}: 'expected.answer_contains' entries must be strings or lists of alternative strings"
+                    )
             tags = row.get("tags", [])
             if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
                 raise ValueError(f"{where}: 'tags' must be a list of strings")

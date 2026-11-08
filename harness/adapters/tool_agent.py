@@ -84,8 +84,9 @@ class ToolAgentAdapter(Adapter):
                     executed.append((tc, result_text))
                 messages.extend(provider.build_tool_result_messages(executed))
 
-            # Hit MAX_STEPS without a final answer -- report it as a real
-            # failure (empty output), not a silent success with no answer.
+            # Hit MAX_STEPS without a final answer. This is the model failing the
+            # task, not the infrastructure failing, so it is a failed check rather
+            # than an error (errors block the gate and baselines for a different reason).
             latency_ms = (time.perf_counter() - start) * 1000
             return RunTrace(
                 case_id=case.id,
@@ -97,7 +98,7 @@ class ToolAgentAdapter(Adapter):
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
                 cache_hit=all_cached,
-                error=f"exceeded MAX_STEPS={MAX_STEPS} without a final answer",
+                failure_note=f"no final answer within MAX_STEPS={MAX_STEPS} tool-call turns",
             )
 
         except BudgetExceededError:

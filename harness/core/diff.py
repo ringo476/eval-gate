@@ -47,6 +47,7 @@ class DiffResult:
     baseline_mean_score: float | None = None
     baseline_pass_rate: float | None = None
     threshold: float = DEFAULT_REGRESSION_THRESHOLD
+    baseline_meta: dict[str, Any] = field(default_factory=dict)  # judge, temperature, ... of the baseline run
 
 
 @dataclass
@@ -142,6 +143,7 @@ def diff_cases(
         baseline_mean_score=ref.mean_score,
         baseline_pass_rate=ref.pass_rate,
         threshold=threshold,
+        baseline_meta=ref.meta,
     )
 
 

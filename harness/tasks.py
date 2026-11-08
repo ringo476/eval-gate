@@ -27,16 +27,19 @@ def _rag_fusion_adapter():
 
 
 def _rag_fusion_scorers(judge_provider):
+    from harness.scorers.citations import CitationValidityScorer
     from harness.scorers.contains import ContainsScorer
     from harness.scorers.embedding_sim import EmbeddingSimilarityScorer
-    from harness.scorers.llm_judge import LLMJudgeScorer
+    from harness.scorers.llm_judge import GroundednessScorer, LLMJudgeScorer
     from harness.scorers.retrieval import RetrievalHitRateScorer
 
     return [
         ContainsScorer(),
         RetrievalHitRateScorer(),
+        CitationValidityScorer(),
         EmbeddingSimilarityScorer(),
         LLMJudgeScorer(judge_provider),
+        GroundednessScorer(judge_provider),
     ]
 
 

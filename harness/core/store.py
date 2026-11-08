@@ -194,6 +194,32 @@ class RunStore:
             for r in rows
         }
 
+    def task_models(self) -> list[tuple[str, str]]:
+        """Every (task, model) pair with at least one stored run."""
+        return [(r[0], r[1]) for r in self._conn.execute(
+            "SELECT DISTINCT task, model FROM runs ORDER BY task, model"
+        )]
+
+    def case_details(self, run_id: str) -> dict[str, dict]:
+        """Per-case outcome plus which checks failed and why, for display."""
+        rows = self._conn.execute(
+            "SELECT case_id, passed, aggregate_score, pass_rate, n_samples, error, scores_json "
+            "FROM case_results WHERE run_id = ? ORDER BY case_id",
+            (run_id,),
+        ).fetchall()
+        details = {}
+        for case_id, passed, score, pass_rate, n_samples, error, scores_json in rows:
+            scores = json.loads(scores_json or "[]")
+            details[case_id] = {
+                "passed": bool(passed), "score": score, "n_samples": n_samples,
+                "pass_rate": float(passed) if pass_rate is None else pass_rate, "error": error,
+                "failed": [
+                    {"scorer": s["scorer"], "reason": (s.get("details") or {}).get("reason", "")}
+                    for s in scores if not s.get("passed")
+                ],
+            }
+        return details
+
     def run_history(self, task: str, model: str, limit: int = 20) -> list[dict]:
         rows = self._conn.execute(
             """SELECT run_id, timestamp, mean_score, pass_rate, total_cost_usd, error_count,
@@ -209,6 +235,7 @@ class RunStore:
                 "total_cost_usd": r[4], "error_count": r[5], "repeats": r[6],
                 "is_partial": bool(r[7]), "is_aborted": bool(r[8]),
                 "git_sha": (meta.get("git_sha") or "")[:7],
+                "dataset_sha256": meta.get("dataset_sha256"),
             })
         return history
 

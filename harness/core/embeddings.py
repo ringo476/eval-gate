@@ -6,16 +6,21 @@ it's paid for (load time) once, not per caller.
 """
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 
 _model = None
+_model_lock = threading.Lock()
 
 
 def get_embedding_model():
     global _model
     if _model is None:
-        from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
+        with _model_lock:  # workers start at once; without this each would load its own copy
+            if _model is None:
+                from sentence_transformers import SentenceTransformer
+                _model = SentenceTransformer("all-MiniLM-L6-v2")
     return _model
 
 

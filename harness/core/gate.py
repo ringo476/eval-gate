@@ -36,6 +36,17 @@ class GateVerdict:
     pass_rate: float = 0.0
 
 
+def _comparability_warnings(run_meta: dict[str, Any], baseline_meta: dict[str, Any]) -> list[str]:
+    """A different judge or temperature changes the scores on its own, so a
+    regression (or its absence) may not mean what it appears to mean."""
+    labels = {"judge_model": "judge", "temperature": "temperature"}
+    return [
+        f"not like-for-like: {label} is {run_meta[key]!r} here but {baseline_meta[key]!r} in the baseline"
+        for key, label in labels.items()
+        if key in run_meta and key in baseline_meta and run_meta[key] != baseline_meta[key]
+    ]
+
+
 def evaluate_gate(
     *,
     run: dict[str, Any],
@@ -112,6 +123,14 @@ def evaluate_gate(
         if diff.degraded:
             message = f"{len(diff.degraded)} case(s) became flakier vs baseline: {', '.join(diff.degraded)}"
             (failures if fail_on_degraded else warnings).append(message)
+        warnings.extend(_comparability_warnings(run.get("meta") or {}, diff.baseline_meta))
+
+    meta = run.get("meta") or {}
+    if meta.get("cached_samples") and meta.get("cached_samples") == meta.get("total_samples"):
+        warnings.append(
+            "every answer in this run was replayed from the response cache, so it re-tested the scorers but not "
+            "the model; use `run --no-cache` to check the model itself"
+        )
 
     return GateVerdict(ok=not failures, failures=failures, warnings=warnings,
                        mean_score=mean_score, pass_rate=pass_rate)

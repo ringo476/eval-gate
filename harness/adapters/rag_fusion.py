@@ -53,6 +53,8 @@ def get_target_module():
     return module
 
 
+MAX_EXPANDED_QUERIES = 4
+
 QUERY_EXPANSION_SYSTEM = (
     "You are a search expert. Generate multiple search queries based on a "
     "single input query, to improve retrieval recall. Output exactly 4 "
@@ -135,7 +137,9 @@ class RagFusionAdapter(Adapter):
                 f"Generate 4 search queries related to: {original_query}",
                 system=QUERY_EXPANSION_SYSTEM,
             )
-            expanded_queries = _clean_query_lines(expansion_resp.text)
+            # Model output is untrusted: a chatty reply must not fan out into
+            # dozens of searches.
+            expanded_queries = _clean_query_lines(expansion_resp.text)[:MAX_EXPANDED_QUERIES]
             all_queries = [original_query] + expanded_queries
 
             # All ChromaDB access is serialized behind one lock -- the
@@ -148,10 +152,14 @@ class RagFusionAdapter(Adapter):
                     all_results[query] = target.vector_search(query, collection, n_results=5)
 
                 fused = target.reciprocal_rank_fusion(all_results, verbose=False)
-                top_doc_ids = list(fused.keys())[: self.top_k]
+                ranking = list(fused.keys())
+                top_doc_ids = ranking[: self.top_k]
 
+                # get() doesn't promise to return documents in the order asked
+                # for, so restore the fused ranking explicitly.
                 fetched = collection.get(ids=top_doc_ids)
-                top_docs = list(zip(fetched["ids"], fetched["documents"]))
+                texts = dict(zip(fetched["ids"], fetched["documents"]))
+                top_docs = [(doc_id, texts[doc_id]) for doc_id in top_doc_ids]
 
             doc_block = "\n".join(f"[{doc_id}] {text}" for doc_id, text in top_docs)
             query_block = "\n".join(f"- {q}" for q in all_queries)
@@ -173,6 +181,7 @@ class RagFusionAdapter(Adapter):
                 case_id=case.id,
                 output_text=synthesis_resp.text,
                 retrieved_chunks=[{"source": doc_id, "text": text} for doc_id, text in top_docs],
+                retrieval_ranking=ranking,
                 model=provider.name,
                 input_tokens=expansion_resp.input_tokens + synthesis_resp.input_tokens,
                 output_tokens=expansion_resp.output_tokens + synthesis_resp.output_tokens,

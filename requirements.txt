@@ -1,13 +1,11 @@
-anthropic>=0.40.0
-sentence-transformers>=3.0.0
-numpy>=1.26.0
-python-dotenv>=1.0.0
-tabulate>=0.9.0
-tenacity>=9.0.0
-chromadb>=0.5.0
-
-# Not called by the harness -- required only because the vendored target
-# app (targets/rag-fusion/main.py) imports `from openai import OpenAI` at
-# module level. We never construct or use that client; the adapter
-# substitutes our own ModelProvider for every actual model call.
-openai>=1.0.0
+# Bounded to the major versions this project is tested against, so a fresh
+# install next year behaves like one today. Dependabot proposes the upgrades,
+# and CI proves them, before a bound moves.
+anthropic>=2.0,<3
+openai>=3.0,<4
+sentence-transformers>=6.0,<7
+numpy>=2.0,<3
+python-dotenv>=1.0,<2
+tabulate>=0.10,<1
+tenacity>=9.0,<10
+chromadb>=1.5,<2

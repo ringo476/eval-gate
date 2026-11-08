@@ -9,6 +9,7 @@ CLI entry point.
     python -m harness.cli compare --task rag_fusion_qa --models gpt-6-luna llama3.1:8b
     python -m harness.cli calibrate --provider openai
     python -m harness.cli history --model gpt-6-luna
+    python -m harness.cli dashboard
 
 Every subcommand defaults to --provider mock unless another provider is
 passed explicitly, so an unfamiliar reader cannot accidentally spend money
@@ -44,22 +45,29 @@ from harness.core.baseline import (
 )
 from harness.core.budget import BudgetExceededError, BudgetGuard
 from harness.core.cache import ResponseCache
+from harness.core.dashboard import write_dashboard
 from harness.core.dataset import filter_smoke, load_jsonl
 from harness.core.diff import DEFAULT_REGRESSION_THRESHOLD, diff_runs
 from harness.core.gate import evaluate_gate
 from harness.core.models import RunTrace
 from harness.core.providers import GenerationSettings, check_ollama, get_provider, list_ollama_models
 from harness.core.report import render_comparison, render_run_report, write_report
+from harness.core.retrieval_metrics import aggregate_retrieval
 from harness.core.runmeta import collect_meta, file_sha256
 from harness.core.runner import Runner
 from harness.core.stats import pearson
 from harness.core.store import RunStore
 from harness.logging_setup import setup_logging
+from harness.scorers.llm_judge import GroundednessScorer, LLMJudgeScorer
 from harness.tasks import TASKS, get_task
 
 logger = logging.getLogger("harness.cli")
 
-DEFAULT_CALIBRATION = "golden/calibration_labels.jsonl"
+# What `calibrate` can test: which hand-labeled set, and which LLM grader.
+CALIBRATION_KINDS = {
+    "judge": ("golden/calibration_labels.jsonl", "judge_calibration", LLMJudgeScorer),
+    "groundedness": ("golden/groundedness_labels.jsonl", "groundedness_calibration", GroundednessScorer),
+}
 
 # Used when no judge model is specified -- a judge model name only makes
 # sense paired with a matching provider, so the default is looked up by
@@ -172,7 +180,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         adapter = task_spec.adapter_factory()
         scorers = task_spec.scorers_factory(judge_provider)
         runner = Runner(adapter, scorers, provider, max_workers=args.max_workers or config.max_workers,
-                        repeats=args.repeats)
+                        repeats=args.repeats, max_consecutive_errors=args.max_consecutive_errors)
 
         summary = runner.run(cases)
         summary.meta = collect_meta(
@@ -181,6 +189,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             temperature=task_settings.temperature, max_output_tokens=task_settings.max_output_tokens,
             repeats=args.repeats, dataset_path=str(dataset_path), dataset_sha256=dataset_sha,
             dataset_case_count=len(all_cases), partial=len(cases) < len(all_cases), smoke=args.smoke,
+            retrieval=aggregate_retrieval(summary.case_results),
+            cached_samples=sum(1 for c in summary.case_results if c.trace.cache_hit),
+            total_samples=len(summary.case_results),
         )
 
         store = RunStore(config.runs_db_path)
@@ -303,6 +314,11 @@ def cmd_baseline_set(args: argparse.Namespace) -> int:
         p = previous.summary
         print(f"  replaced previous baseline (pass_rate={p['pass_rate']:.1%} mean_score={p['mean_score']:.3f}, "
               f"run {previous.source_run_id})")
+    pinned = {c.id for c in load_jsonl(get_task(args.task).dataset_path, expected_task=args.task) if c.is_pinned}
+    failing_pinned = sorted(cid for cid in pinned if baseline.cases.get(cid, {}).get("pass_rate", 0.0) < 1.0)
+    if failing_pinned:
+        print(f"WARN: pinned case(s) fail in this baseline, so the gate stays red until they pass: "
+              f"{', '.join(failing_pinned)}")
     print(f"Review the change and commit it:  git add {path}")
     return 0
 
@@ -368,9 +384,9 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     Run this whenever the judge model or its prompt changes."""
     from tabulate import tabulate
 
-    from harness.scorers.llm_judge import LLMJudgeScorer
-
     config = load_config()
+    default_dataset, expected_task, scorer_cls = CALIBRATION_KINDS[args.kind]
+    dataset = args.dataset or default_dataset
     model = args.judge_model or config.judge_model or DEFAULT_JUDGE_MODEL_BY_PROVIDER[args.provider]
     settings = GenerationSettings(
         temperature=args.temperature,
@@ -380,7 +396,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     budget = BudgetGuard(args.max_cost_usd or config.max_cost_usd)
     try:
         judge_provider = _make_provider(args.provider, model, config, cache, budget, settings, args.allow_unpriced)
-        cases = load_jsonl(args.dataset, expected_task="judge_calibration")
+        cases = load_jsonl(dataset, expected_task=expected_task)
 
         rows, valid_human, valid_judge, invalid = [], [], [], 0
         by_tag: dict[str, list[float]] = {}
@@ -390,9 +406,12 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         for i, case in enumerate(cases, start=1):
             samples, bad = [], 0
             for r in range(args.repeats):
-                judge = LLMJudgeScorer(judge_provider.scoped(r))
-                trace = RunTrace(case_id=case.id, output_text=case.input.get("candidate_answer", ""),
-                                 model=judge_provider.name)
+                judge = scorer_cls(judge_provider.scoped(r))
+                trace = RunTrace(
+                    case_id=case.id, output_text=case.input.get("candidate_answer", ""), model=judge_provider.name,
+                    retrieved_chunks=[{"source": f"doc{n}", "text": t}
+                                      for n, t in enumerate(case.input.get("context", []), start=1)],
+                )
                 result = judge.score(case, trace)
                 total_cost += judge.total_cost_usd
                 if "error" in result.details:
@@ -431,6 +450,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
     print(tabulate(rows, headers=["case", "human", "judge", "abs_diff", "tags"], floatfmt=".2f"))
     print()
+    print(f"Checking:                   {args.kind}")
     print(f"Judge:                      {model} ({args.provider}), temperature {args.temperature}, repeats {args.repeats}")
     print(f"Cases scored / invalid:     {n_valid} / {invalid}  (invalid = reply wasn't a usable score)")
     print(f"Mean absolute error:        {mae:.3f}   (max {CAL_MAX_MAE})")
@@ -460,14 +480,15 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     reports_dir = Path(config.reports_dir)
     reports_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out_path = reports_dir / f"calibration-{slugify(model)}-{stamp}.json"
+    prefix = "calibration" if args.kind == "judge" else f"calibration-{args.kind}"
+    out_path = reports_dir / f"{prefix}-{slugify(model)}-{stamp}.json"
     out_path.write_text(json.dumps({
-        "judge_model": model, "provider": args.provider, "temperature": args.temperature,
+        "kind": args.kind, "judge_model": model, "provider": args.provider, "temperature": args.temperature,
         "repeats": args.repeats, "n_cases": n_total, "n_valid": n_valid, "invalid": invalid,
         "mae": mae, "pearson": corr, "agreement_within_0.2": close_agreement,
         "false_accept_rate": false_accept, "false_reject_rate": false_reject,
         "self_inconsistency": (sum(stabilities) / len(stabilities)) if stabilities else None,
-        "weak_reasons": weak_reasons, "dataset_sha256": file_sha256(args.dataset),
+        "weak_reasons": weak_reasons, "dataset_sha256": file_sha256(dataset),
         "rows": [list(r) for r in rows],
     }, indent=2, default=str) + "\n", encoding="utf-8")
     print(f"Calibration written to {out_path}")
@@ -519,7 +540,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             problems += 1
         print(f"[{status:>4}] {text}")
 
-    report("ok" if sys.version_info >= (3, 10) else "fail", f"Python {platform.python_version()} (need >= 3.10)")
+    report("ok" if sys.version_info >= (3, 12) else "fail", f"Python {platform.python_version()} (need >= 3.12)")
 
     for module, required in (("openai", True), ("chromadb", True), ("sentence_transformers", True),
                              ("numpy", True), ("tabulate", True), ("tenacity", True), ("dotenv", True),
@@ -570,6 +591,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# dashboard
+# ---------------------------------------------------------------------------
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    config = load_config()
+    store = RunStore(config.runs_db_path)
+    try:
+        out = write_dashboard(store, args.out or Path(config.reports_dir) / "dashboard.html",
+                              baselines_dir=config.baselines_dir, include_mock=args.include_mock)
+    finally:
+        store.close()
+    print(f"Dashboard written to {out}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
 
@@ -605,6 +642,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--repeats", type=int, default=1, help="Samples per case; >1 measures flakiness (use with --temperature > 0)")
     p_run.add_argument("--temperature", type=float, default=None, help="Sampling temperature (default HARNESS_TEMPERATURE, 0)")
     p_run.add_argument("--max-workers", type=int, default=None)
+    p_run.add_argument("--max-consecutive-errors", type=int, default=5,
+                       help="Abort the run after this many samples in a row error (bad key, dead server)")
     p_run.set_defaults(func=cmd_run)
 
     p_diff = sub.add_parser("diff", parents=[common, baseline_opts], help="Show regressions vs the baseline")
@@ -641,7 +680,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_cal = sub.add_parser("calibrate", parents=[gen_opts], help="Check the LLM judge against hand-labeled examples")
     p_cal.add_argument("--provider", choices=PROVIDERS, default="mock", help="Provider the judge runs on")
     p_cal.add_argument("--judge-model", default=None)
-    p_cal.add_argument("--dataset", default=DEFAULT_CALIBRATION)
+    p_cal.add_argument("--kind", choices=sorted(CALIBRATION_KINDS), default="judge",
+                       help="Which LLM grader to test: correctness (judge) or groundedness")
+    p_cal.add_argument("--dataset", default=None, help="Default: the labeled set for --kind")
     p_cal.add_argument("--repeats", type=int, default=1, help="Judge each case N times to measure self-consistency")
     p_cal.add_argument("--temperature", type=float, default=0.0)
     p_cal.set_defaults(func=cmd_calibrate)
@@ -649,6 +690,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_hist = sub.add_parser("history", parents=[common], help="Show run history for a task/model")
     p_hist.add_argument("--limit", type=int, default=20)
     p_hist.set_defaults(func=cmd_history)
+
+    p_dash = sub.add_parser("dashboard", help="Write a self-contained HTML summary of every model's latest full run")
+    p_dash.add_argument("--out", default=None, help="Default: reports/dashboard.html")
+    p_dash.add_argument("--include-mock", action="store_true", help="Include mock-provider runs (hidden by default)")
+    p_dash.set_defaults(func=cmd_dashboard)
 
     p_doc = sub.add_parser("doctor", help="Check the environment: packages, datasets, keys, local models")
     p_doc.set_defaults(func=cmd_doctor)

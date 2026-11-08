@@ -11,12 +11,18 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
+# CPU-only PyTorch first: embeddings don't need a GPU here, and the default
+# build pulls in several GB of CUDA libraries.
+RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
+
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# Bake the embedding model into the image so a run never needs to reach
-# huggingface.co.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Bake both embedding models into the image so a run never needs to reach the
+# sites they download from. HF_HUB_OFFLINE stops the library checking for updates.
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" \
+    && python -c "from chromadb.utils.embedding_functions import DefaultEmbeddingFunction; DefaultEmbeddingFunction()(['warm up'])"
+ENV HF_HUB_OFFLINE=1
 
 COPY . .
 RUN bash scripts/setup_target.sh

@@ -207,6 +207,25 @@ def test_baseline_show(env, capsys):
     assert "pass_rate=100.0%" in capsys.readouterr().out
 
 
+def test_dashboard_command_writes_a_page_from_real_runs(env, capsys):
+    do_run()
+    capsys.readouterr()
+    assert cli.main(["dashboard", "--include-mock"]) == 0
+    page = (env.root / "reports" / "dashboard.html").read_text(encoding="utf-8")
+    assert "fake_task" in page and "c1" in page and "<title>Eval Dashboard</title>" in page
+
+
+def test_groundedness_calibration_kind_uses_its_own_dataset_and_prompt(env, capsys):
+    cal = env.root / "g.jsonl"
+    row = {"id": "g-1", "task": "groundedness_calibration", "expected": {}, "human_label": 1.0,
+           "input": {"question": "q", "candidate_answer": "a", "context": ["some document"]}}
+    cal.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    assert cli.main(["calibrate", "--kind", "groundedness", "--provider", "mock", "--dataset", str(cal)]) == 1
+    assert "groundedness" in capsys.readouterr().out
+    written = list((env.root / "reports").glob("calibration-groundedness-*.json"))
+    assert len(written) == 1 and json.loads(written[0].read_text(encoding="utf-8"))["kind"] == "groundedness"
+
+
 def test_calibrate_with_the_mock_judge_reports_it_as_uncalibrated(env, capsys):
     cal = env.root / "cal.jsonl"
     rows = [

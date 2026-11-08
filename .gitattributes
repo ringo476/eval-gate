@@ -1,0 +1,4 @@
+# Same bytes on every OS, so diffs and the dataset fingerprints stay stable.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary

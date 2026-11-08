@@ -17,7 +17,7 @@ class EmbeddingSimilarityScorer(Scorer):
     def score(self, case: EvalCase, trace: RunTrace) -> ScoreResult:
         reference = case.expected.get("reference_answer")
         if not reference:
-            return ScoreResult(self.name, score=1.0, passed=True, details={"note": "no reference"})
+            return ScoreResult(self.name, score=1.0, passed=True, details={"note": "no reference"}, applicable=False)
         if not trace.output_text.strip():
             return ScoreResult(self.name, score=0.0, passed=False, details={"note": "empty output"})
 

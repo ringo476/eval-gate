@@ -275,3 +275,23 @@ def test_check_ollama_when_server_is_down(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen(error=urllib.error.URLError("refused")))
     with pytest.raises(RuntimeError, match="Cannot reach Ollama"):
         check_ollama("anything")
+
+
+def test_reasoning_model_that_refuses_tools_is_retried_with_reasoning_off_and_remembered():
+    # Exact error from gpt-6-luna on the first real call.
+    refusal = bad_request(
+        "Function tools with reasoning_effort are not supported for gpt-6-luna in /v1/chat/completions. "
+        "To use function tools, use /v1/responses or set reasoning_effort to 'none'."
+    )
+    tools = [{"name": "calculator", "description": "d", "parameters": {"type": "object"}}]
+    provider, client = openai_provider(refusal, completion("one"), completion("two"), completion("plain"))
+
+    assert provider.generate_messages([{"role": "user", "content": "q"}], tools=tools).text == "one"
+    assert "reasoning_effort" not in client.calls[0]
+    assert client.calls[1]["reasoning_effort"] == "none"
+
+    provider.generate_messages([{"role": "user", "content": "q"}], tools=tools)
+    assert client.calls[2]["reasoning_effort"] == "none"  # learned: no repeat failure
+
+    provider.generate("q")
+    assert "reasoning_effort" not in client.calls[3]  # calls without tools keep the model's default

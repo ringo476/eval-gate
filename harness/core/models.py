@@ -39,6 +39,7 @@ class RunTrace:
     case_id: str
     output_text: str
     retrieved_chunks: list[dict[str, Any]] = field(default_factory=list)
+    retrieval_ranking: list[str] = field(default_factory=list)  # every retrieved doc id, best first
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     model: str = ""
     input_tokens: int = 0
@@ -46,7 +47,10 @@ class RunTrace:
     latency_ms: float = 0.0
     cost_usd: float = 0.0
     cache_hit: bool = False
-    error: str | None = None
+    error: str | None = None  # the run itself broke (network, crash): an infrastructure problem
+    # The run finished but the app misbehaved in a way scorers can't see, such as
+    # an agent looping until it ran out of steps. A quality failure, not an error.
+    failure_note: str | None = None
 
 
 @dataclass
@@ -55,6 +59,11 @@ class ScoreResult:
     score: float
     passed: bool
     details: dict[str, Any] = field(default_factory=dict)
+    # False when the case has nothing for this scorer to check. Such a result
+    # passes, but must not count toward averages: counting a free 1.0 for every
+    # "no requirement" would flatter the mean score.
+    applicable: bool = True
+    cost_usd: float = 0.0  # what the scorer itself spent (LLM graders only)
 
 
 @dataclass
@@ -72,7 +81,16 @@ class CaseResult:
             return 0.0
         if not self.scores:
             return 0.0
-        return sum(s.score for s in self.scores) / len(self.scores)
+        scored = [s for s in self.scores if s.applicable] or self.scores
+        return sum(s.score for s in scored) / len(scored)
+
+    @property
+    def scoring_cost_usd(self) -> float:
+        return sum(s.cost_usd for s in self.scores)
+
+    @property
+    def total_cost_usd(self) -> float:
+        return self.trace.cost_usd + self.scoring_cost_usd
 
     @property
     def passed(self) -> bool:
@@ -135,7 +153,7 @@ class CaseAggregate:
 
     @property
     def total_cost_usd(self) -> float:
-        return sum(s.trace.cost_usd for s in self.samples)
+        return sum(s.total_cost_usd for s in self.samples)
 
     @property
     def mean_latency_ms(self) -> float:
@@ -170,7 +188,12 @@ class RunSummary:
 
     @property
     def total_cost_usd(self) -> float:
-        return sum(c.trace.cost_usd for c in self.case_results)
+        """Everything the run spent: the app under test plus LLM grading."""
+        return sum(c.total_cost_usd for c in self.case_results)
+
+    @property
+    def scoring_cost_usd(self) -> float:
+        return sum(c.scoring_cost_usd for c in self.case_results)
 
     @property
     def total_latency_ms(self) -> float:

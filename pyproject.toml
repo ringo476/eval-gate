@@ -7,7 +7,7 @@ name = "ai-model-harness"
 dynamic = ["version", "dependencies"]
 description = "Provider-agnostic eval harness for LLM-powered apps: regression gating against committed baselines, judge calibration, repeat-sampling for flakiness, cost/budget controls, and local-model support."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 
 [project.scripts]
@@ -30,3 +30,10 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["harness"]
+
+[tool.coverage.report]
+fail_under = 85
+skip_covered = true

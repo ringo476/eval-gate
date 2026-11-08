@@ -23,6 +23,22 @@ def intervals_overlap(a: tuple[float, float], b: tuple[float, float]) -> bool:
     return a[0] <= b[1] and b[0] <= a[1]
 
 
+def mcnemar_exact(only_a: int, only_b: int) -> float:
+    """Exact two-sided McNemar p-value for two models run on the SAME cases.
+
+    Only the cases where they disagree carry information: if the models were
+    equally good, each disagreement would be a coin flip. The result is the
+    chance of a split at least this lopsided from coin flips alone. This is the
+    right test here; comparing two confidence intervals ignores that the cases
+    are shared and is far too cautious.
+    """
+    n = only_a + only_b
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, i) for i in range(min(only_a, only_b) + 1)) / 2**n
+    return min(1.0, 2 * tail)
+
+
 def percentile(values: list[float], pct: float) -> float:
     """Linear-interpolated percentile, pct in [0, 100]. 0.0 for an empty list."""
     if not values:
