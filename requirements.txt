@@ -1,7 +1,7 @@
 # Bounded to the major versions this project is tested against, so a fresh
 # install next year behaves like one today. Dependabot proposes the upgrades,
 # and CI proves them, before a bound moves.
-anthropic>=2.0,<3
+anthropic>=2.6.0,<3
 openai>=3.0,<4
 sentence-transformers>=6.0,<7
 numpy>=2.0,<3
