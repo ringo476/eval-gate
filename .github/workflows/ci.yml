@@ -33,7 +33,7 @@ jobs:
       # Both embedding libraries download a model on first use; cache them so
       # CI doesn't depend on those sites being reachable every run.
       - name: Cache embedding models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/huggingface
