@@ -72,7 +72,7 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.secret.outputs.present == 'true'
 
       - uses: actions/setup-python@v5
