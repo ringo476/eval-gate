@@ -195,7 +195,7 @@ def test_compare(env, capsys):
     capsys.readouterr()
     out_file = env.root / "cmp.md"
     assert cli.main(["compare", "--task", "fake_task", "--models", "mock", "--out", str(out_file)]) == 0
-    assert "Model comparison" in out_file.read_text(encoding="utf-8")
+    assert "# Comparison" in out_file.read_text(encoding="utf-8")
 
 
 def test_baseline_show(env, capsys):
@@ -240,3 +240,25 @@ def test_calibrate_with_the_mock_judge_reports_it_as_uncalibrated(env, capsys):
     written = list((env.root / "reports").glob("calibration-*.json"))
     assert len(written) == 1
     assert json.loads(written[0].read_text(encoding="utf-8"))["invalid"] == 3
+
+
+def test_compare_two_tasks_on_one_golden_set(env, monkeypatch, capsys):
+    """compare --tasks: the same model through two pipelines, paired case by case."""
+    class VariantAdapter(ControlledAdapter):
+        task = "fake_variant"
+
+        def run(self, case, provider):
+            text = "nothing useful" if case.id == "c3" else f"the answer is {case.input['needle']}"
+            return RunTrace(case_id=case.id, output_text=text, model=provider.name)
+
+    monkeypatch.setitem(TASKS, "fake_variant", TaskSpec(
+        dataset_path=str(env.dataset), adapter_factory=VariantAdapter,
+        scorers_factory=lambda judge: [ContainsScorer()], dataset_task="fake_task",
+    ))
+    assert do_run() == 0
+    assert cli.main(["run", "--task", "fake_variant", "--provider", "mock"]) in (0, 1)
+    capsys.readouterr()
+    assert cli.main(["compare", "--tasks", "fake_task", "fake_variant", "--models", "mock"]) == 0
+    out = capsys.readouterr().out
+    assert "| fake_task vs fake_variant | 1 | 0 |" in out
+    assert "| c3 | PASS" in out

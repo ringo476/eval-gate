@@ -59,7 +59,7 @@ from harness.core.stats import pearson
 from harness.core.store import RunStore
 from harness.logging_setup import setup_logging
 from harness.scorers.llm_judge import GroundednessScorer, LLMJudgeScorer
-from harness.tasks import TASKS, get_task
+from harness.tasks import TASKS, dataset_task_of, get_task
 
 logger = logging.getLogger("harness.cli")
 
@@ -172,7 +172,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         task_spec = get_task(args.task)
         dataset_path = args.dataset or task_spec.dataset_path
-        all_cases = load_jsonl(dataset_path, expected_task=args.task)
+        all_cases = load_jsonl(dataset_path, expected_task=dataset_task_of(args.task))
         dataset_sha = file_sha256(dataset_path)
         cases = filter_smoke(all_cases, n=args.smoke) if args.smoke is not None else all_cases
         logger.info("loaded %d cases from %s (running %d)", len(all_cases), dataset_path, len(cases))
@@ -259,7 +259,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
             return 2
 
         dataset_path = args.dataset or get_task(args.task).dataset_path
-        cases = load_jsonl(dataset_path, expected_task=args.task)
+        cases = load_jsonl(dataset_path, expected_task=dataset_task_of(args.task))
         pinned_ids = {c.id for c in cases if c.is_pinned}
         case_results = store.case_results_for_run(run_id)
         diff = diff_runs(store, args.task, args.model, run_id, **_baseline_kwargs(config, args))
@@ -314,7 +314,7 @@ def cmd_baseline_set(args: argparse.Namespace) -> int:
         p = previous.summary
         print(f"  replaced previous baseline (pass_rate={p['pass_rate']:.1%} mean_score={p['mean_score']:.3f}, "
               f"run {previous.source_run_id})")
-    pinned = {c.id for c in load_jsonl(get_task(args.task).dataset_path, expected_task=args.task) if c.is_pinned}
+    pinned = {c.id for c in load_jsonl(get_task(args.task).dataset_path, expected_task=dataset_task_of(args.task)) if c.is_pinned}
     failing_pinned = sorted(cid for cid in pinned if baseline.cases.get(cid, {}).get("pass_rate", 0.0) < 1.0)
     if failing_pinned:
         print(f"WARN: pinned case(s) fail in this baseline, so the gate stays red until they pass: "
@@ -348,24 +348,31 @@ def cmd_baseline_show(args: argparse.Namespace) -> int:
 
 def cmd_compare(args: argparse.Namespace) -> int:
     config = load_config()
+    tasks = args.tasks or [args.task]
+    if len({dataset_task_of(t) for t in tasks}) > 1:
+        print("--tasks must share one golden set, or the paired test compares different questions.", file=sys.stderr)
+        return 3
     store = RunStore(config.runs_db_path)
     try:
         runs, results, missing = [], {}, []
-        for model in args.models:
-            run_id = store.latest_run_id(args.task, model, full_only=True)
-            if run_id is None:
-                missing.append(model)
-                continue
-            runs.append(store.get_run(run_id))
-            results[run_id] = store.case_results_for_run(run_id)
+        for task in tasks:
+            for model in args.models:
+                run_id = store.latest_run_id(task, model, full_only=True)
+                if run_id is None:
+                    missing.append(f"{task}/{model}")
+                    continue
+                run = store.get_run(run_id)
+                if len(tasks) > 1:
+                    run["label"] = f"{task} / {model}" if len(args.models) > 1 else task
+                runs.append(run)
+                results[run_id] = store.case_results_for_run(run_id)
     finally:
         store.close()
 
     if missing:
-        print(f"No full run found for: {', '.join(missing)} (task={args.task}). Run `harness run` for each first.",
-              file=sys.stderr)
+        print(f"No full run found for: {', '.join(missing)}. Run `harness run` for each first.", file=sys.stderr)
         return 2
-    text = render_comparison(args.task, runs, results)
+    text = render_comparison(" vs ".join(tasks), runs, results)
     print(text)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
@@ -566,7 +573,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     for name, spec in TASKS.items():
         try:
-            cases = load_jsonl(spec.dataset_path, expected_task=name)
+            cases = load_jsonl(spec.dataset_path, expected_task=dataset_task_of(name))
             pinned = sum(1 for c in cases if c.is_pinned)
             report("ok", f"dataset {spec.dataset_path}: {len(cases)} cases, {pinned} pinned")
         except (OSError, ValueError) as e:
@@ -671,8 +678,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_bshow = base_sub.add_parser("show", parents=[common], help="Print the committed baseline")
     p_bshow.set_defaults(func=cmd_baseline_show)
 
-    p_cmp = sub.add_parser("compare", help="Side-by-side comparison of models on one task")
+    p_cmp = sub.add_parser("compare", help="Side-by-side comparison of models on one task, or of tasks on one model")
     p_cmp.add_argument("--task", default="rag_fusion_qa", choices=sorted(TASKS))
+    p_cmp.add_argument("--tasks", nargs="+", default=None, choices=sorted(TASKS),
+                       help="Compare these tasks instead of one (they must share a golden set), "
+                            "e.g. rag_fusion_qa rag_single_qa")
     p_cmp.add_argument("--models", nargs="+", required=True, help="Models with an existing full run")
     p_cmp.add_argument("--out", default=None, help="Also write the comparison to this Markdown file")
     p_cmp.set_defaults(func=cmd_compare)

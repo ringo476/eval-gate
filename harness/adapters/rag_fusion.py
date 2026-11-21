@@ -89,17 +89,28 @@ def _clean_query_lines(raw_text: str) -> list[str]:
     return lines
 
 
+RETRIEVAL_MODES = {"fusion": "rag_fusion_qa", "single": "rag_single_qa"}
+
+
 class RagFusionAdapter(Adapter):
     """Runs the rag-fusion pipeline end to end against our own corpus,
     with `provider` supplying both the query-expansion and
-    answer-synthesis steps."""
+    answer-synthesis steps.
 
-    task = "rag_fusion_qa"
+    retrieval="single" is the control for testing rag-fusion's own claim:
+    the same pipeline with the expansion and fusion steps removed, so the
+    original query is searched once with the same vector_search. Everything
+    else (corpus, top_k, synthesis prompt, model) is identical, so any
+    difference between the two tasks comes from multi-query fusion."""
 
-    def __init__(self, corpus_docs: dict[str, str], top_k: int = 3):
+    def __init__(self, corpus_docs: dict[str, str], top_k: int = 3, retrieval: str = "fusion"):
         """corpus_docs: {doc_id: document_text}"""
+        if retrieval not in RETRIEVAL_MODES:
+            raise ValueError(f"retrieval must be one of {sorted(RETRIEVAL_MODES)}, got {retrieval!r}")
         self.corpus_docs = corpus_docs
         self.top_k = top_k
+        self.retrieval = retrieval
+        self.task = RETRIEVAL_MODES[retrieval]
         self._collection = None
         self._collection_lock = threading.Lock()
 
@@ -133,13 +144,16 @@ class RagFusionAdapter(Adapter):
 
             start = time.perf_counter()
 
-            expansion_resp = provider.generate(
-                f"Generate 4 search queries related to: {original_query}",
-                system=QUERY_EXPANSION_SYSTEM,
-            )
-            # Model output is untrusted: a chatty reply must not fan out into
-            # dozens of searches.
-            expanded_queries = _clean_query_lines(expansion_resp.text)[:MAX_EXPANDED_QUERIES]
+            expansion_resp = None
+            expanded_queries: list[str] = []
+            if self.retrieval == "fusion":
+                expansion_resp = provider.generate(
+                    f"Generate 4 search queries related to: {original_query}",
+                    system=QUERY_EXPANSION_SYSTEM,
+                )
+                # Model output is untrusted: a chatty reply must not fan out into
+                # dozens of searches.
+                expanded_queries = _clean_query_lines(expansion_resp.text)[:MAX_EXPANDED_QUERIES]
             all_queries = [original_query] + expanded_queries
 
             # All ChromaDB access is serialized behind one lock -- the
@@ -151,8 +165,10 @@ class RagFusionAdapter(Adapter):
                 for query in all_queries:
                     all_results[query] = target.vector_search(query, collection, n_results=5)
 
-                fused = target.reciprocal_rank_fusion(all_results, verbose=False)
-                ranking = list(fused.keys())
+                if self.retrieval == "fusion":
+                    ranking = list(target.reciprocal_rank_fusion(all_results, verbose=False).keys())
+                else:
+                    ranking = list(all_results[original_query].keys())
                 top_doc_ids = ranking[: self.top_k]
 
                 # get() doesn't promise to return documents in the order asked
@@ -169,13 +185,19 @@ class RagFusionAdapter(Adapter):
                 f"Retrieved documents:\n{doc_block}\n\n"
                 f"Provide a well-structured answer to the original query, "
                 f"using only the documents above."
+            ) if self.retrieval == "fusion" else (
+                f"Query: \"{original_query}\"\n\n"
+                f"Retrieved documents:\n{doc_block}\n\n"
+                f"Provide a well-structured answer to the query, "
+                f"using only the documents above."
             )
             synthesis_resp = provider.generate(synthesis_prompt, system=SYNTHESIS_SYSTEM)
 
             latency_ms = (time.perf_counter() - start) * 1000
 
-            total_cost = _leg_cost(provider.name, expansion_resp) + _leg_cost(provider.name, synthesis_resp)
-            fully_cached = expansion_resp.cache_hit and synthesis_resp.cache_hit
+            legs = [r for r in (expansion_resp, synthesis_resp) if r is not None]
+            total_cost = sum(_leg_cost(provider.name, r) for r in legs)
+            fully_cached = all(r.cache_hit for r in legs)
 
             return RunTrace(
                 case_id=case.id,
@@ -183,8 +205,8 @@ class RagFusionAdapter(Adapter):
                 retrieved_chunks=[{"source": doc_id, "text": text} for doc_id, text in top_docs],
                 retrieval_ranking=ranking,
                 model=provider.name,
-                input_tokens=expansion_resp.input_tokens + synthesis_resp.input_tokens,
-                output_tokens=expansion_resp.output_tokens + synthesis_resp.output_tokens,
+                input_tokens=sum(r.input_tokens for r in legs),
+                output_tokens=sum(r.output_tokens for r in legs),
                 latency_ms=latency_ms,
                 cost_usd=total_cost,
                 cache_hit=fully_cached,

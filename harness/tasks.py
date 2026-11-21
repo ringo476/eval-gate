@@ -18,12 +18,21 @@ class TaskSpec:
     dataset_path: str
     adapter_factory: Callable[[], Adapter]
     scorers_factory: Callable[[ModelProvider], list[Scorer]]
+    # The `task` value the dataset's rows carry, when it differs from the
+    # task name: a variant that reuses another task's golden set.
+    dataset_task: str | None = None
 
 
 def _rag_fusion_adapter():
     from harness.adapters.rag_fusion import RagFusionAdapter
     from harness.corpus import CORPUS
     return RagFusionAdapter(CORPUS)
+
+
+def _rag_single_adapter():
+    from harness.adapters.rag_fusion import RagFusionAdapter
+    from harness.corpus import CORPUS
+    return RagFusionAdapter(CORPUS, retrieval="single")
 
 
 def _rag_fusion_scorers(judge_provider):
@@ -68,6 +77,14 @@ TASKS: dict[str, TaskSpec] = {
         adapter_factory=_rag_fusion_adapter,
         scorers_factory=_rag_fusion_scorers,
     ),
+    # Control for rag-fusion's claim: same questions, same pipeline, one
+    # search with the original query instead of expansion + fusion.
+    "rag_single_qa": TaskSpec(
+        dataset_path="golden/rag_fusion_qa.jsonl",
+        adapter_factory=_rag_single_adapter,
+        scorers_factory=_rag_fusion_scorers,
+        dataset_task="rag_fusion_qa",
+    ),
     "tool_agent_qa": TaskSpec(
         dataset_path="golden/tool_agent_qa.jsonl",
         adapter_factory=_tool_agent_adapter,
@@ -80,3 +97,8 @@ def get_task(task_name: str) -> TaskSpec:
     if task_name not in TASKS:
         raise ValueError(f"Unknown task '{task_name}'. Known tasks: {', '.join(TASKS)}")
     return TASKS[task_name]
+
+
+def dataset_task_of(task_name: str) -> str:
+    """The `task` value rows in this task's dataset must carry."""
+    return get_task(task_name).dataset_task or task_name

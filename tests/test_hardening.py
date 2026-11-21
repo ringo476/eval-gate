@@ -80,10 +80,10 @@ def test_valid_human_label_boundaries(tmp_path):
 
 
 def test_shipped_datasets_are_valid_and_well_formed():
-    from harness.tasks import TASKS
+    from harness.tasks import TASKS, dataset_task_of
 
     for name, spec in TASKS.items():
-        cases = load_jsonl(spec.dataset_path, expected_task=name)
+        cases = load_jsonl(spec.dataset_path, expected_task=dataset_task_of(name))
         assert len(cases) >= 10
         assert any(c.is_pinned for c in cases), f"{name} has no pinned cases"
     labelled = load_jsonl("golden/calibration_labels.jsonl", expected_task="judge_calibration")

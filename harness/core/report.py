@@ -236,10 +236,12 @@ def render_comparison(task: str, runs: list[dict[str, Any]], results: dict[str, 
     runs:    store.get_run() dicts, one per model (the latest full run of each)
     results: {run_id: store.case_results_for_run(run_id)}
     """
-    labels = [r["model"] for r in runs]
-    lines = [f"# Model comparison: `{task}`", ""]
+    for r in runs:
+        r.setdefault("label", r["model"])
+    labels = [r["label"] for r in runs]
+    lines = [f"# Comparison: `{task}`", ""]
 
-    lines += ["| Model | Pass rate (95% CI) | Mean score | Cost | Errors | Judge | Run |", "|---|---|---|---|---|---|---|"]
+    lines += ["| Run | Pass rate (95% CI) | Mean score | Cost | Errors | Judge | Run |", "|---|---|---|---|---|---|---|"]
     for r in runs:
         n = r["case_count"]
         k = round(r["pass_rate"] * n)
@@ -247,7 +249,7 @@ def render_comparison(task: str, runs: list[dict[str, Any]], results: dict[str, 
         judge = r["meta"].get("judge_model", "?")
         flag = " (self-judged)" if r["meta"].get("self_judged") else ""
         lines.append(
-            f"| {r['model']} | {r['pass_rate']:.1%} ({lo:.0%}-{hi:.0%}) | {r['mean_score']:.3f} | "
+            f"| {r['label']} | {r['pass_rate']:.1%} ({lo:.0%}-{hi:.0%}) | {r['mean_score']:.3f} | "
             f"${r['total_cost_usd']:.4f} | {r['error_count']} | {judge}{flag} | `{r['run_id']}` |"
         )
     lines.append("")
@@ -258,23 +260,23 @@ def render_comparison(task: str, runs: list[dict[str, Any]], results: dict[str, 
                   "which changes scores on its own.", ""]
 
     if any(r["meta"].get("retrieval") for r in runs):
-        lines += ["## Retrieval quality", "", "| Model | Recall@1 | Recall@3 | Recall@5 | Precision@3 | nDCG@3 | MRR |",
+        lines += ["## Retrieval quality", "", "| Run | Recall@1 | Recall@3 | Recall@5 | Precision@3 | nDCG@3 | MRR |",
                   "|---|---|---|---|---|---|---|"]
         for r in runs:
             m = r["meta"].get("retrieval")
             if m:
-                lines.append(f"| {r['model']} | {m['recall@1']:.3f} | {m['recall@3']:.3f} | {m['recall@5']:.3f} | "
+                lines.append(f"| {r['label']} | {m['recall@1']:.3f} | {m['recall@3']:.3f} | {m['recall@5']:.3f} | "
                              f"{m['precision@3']:.3f} | {m['ndcg@3']:.3f} | {m['mrr']:.3f} |")
         lines.append("")
 
     if len(runs) > 1:
         lines += ["## Is the difference real? (paired test on shared cases)", "",
-                  "| Models | Only first passes | Only second passes | p-value | Reading |", "|---|---|---|---|---|"]
+                  "| Pair | Only first passes | Only second passes | p-value | Reading |", "|---|---|---|---|---|"]
         for a, b in combinations(runs, 2):
             only_a, only_b = paired_disagreements(results[a["run_id"]], results[b["run_id"]])
             p = mcnemar_exact(only_a, only_b)
             reading = "unlikely to be chance" if p < 0.05 else "could be chance"
-            lines.append(f"| {a['model']} vs {b['model']} | {only_a} | {only_b} | {p:.3f} | {reading} |")
+            lines.append(f"| {a['label']} vs {b['label']} | {only_a} | {only_b} | {p:.3f} | {reading} |")
         lines += ["", "_Exact McNemar test: if two models were equally good, each disagreement would be a coin flip._", ""]
 
     all_cases = sorted({cid for res in results.values() for cid in res})
