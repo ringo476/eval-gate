@@ -105,6 +105,40 @@ What stood out:
   valid citations fabricated because I hadn't shown it the document ids, and an agent
   hitting its step limit was being logged as an infrastructure error. Both are fixed.
 
+## Does rag-fusion actually help?
+
+rag-fusion's idea is to have the model rewrite the question 4 ways, search with all of
+them and merge the results. I tested that claim against a plain single search with the
+same everything else (`rag_single_qa`), plus two fixes of my own. Pass rates on the 35
+questions:
+
+| Model | rag-fusion | Single search | Fusion search, plain answer prompt |
+|---|---|---|---|
+| gemma2:9b | 91.4% | 88.6% | 85.7% |
+| gpt-6-luna | 91.4% | 88.6% | 85.7% |
+| llama3.1:8b | 62.9% | 62.9% | 65.7% |
+| qwen2.5:3b | 40.0% | **62.9%** | 60.0% |
+
+- **Search barely improved.** It found 96.8% of the needed documents vs 95.2% for one
+  search. On 12 extra questions worded unlike the documents ("cow burps" for methane,
+  `golden/rag_hard_qa.jsonl`) both found 95.8%: embedding search already bridges the
+  wording, at least on a 24-document corpus.
+- **It hurt the smallest model** (qwen2.5:3b, 40.0% vs 62.9%, paired test p = 0.021).
+  The cause is the answer prompt, which lists the 4 rewritten questions. The model
+  answered those too, wrote longer answers and failed the groundedness check 20 times
+  instead of 11. With fusion search but a plain answer prompt (`rag_fusion_plain_qa`)
+  it was back to 60.0%, level with single search (p = 0.09 against rag-fusion; 35
+  questions is a small sample). The other models' differences are all within chance.
+- **It costs twice the time:** 2.2 s vs 1.1 s median per question, 1.56x the tokens
+  (gemma2:9b, uncached).
+- **A one-line injection guard** in the system prompt (`rag_fusion_guarded_qa`) stopped
+  gpt-6-luna writing the poem, but llama3.1:8b and qwen2.5:3b still wrote it, and qwen
+  started hedging correct answers with "the documents don't say" (60.0% to 42.9%,
+  p = 0.15). A prompt line is not a defence for small models.
+
+On this data, plain single search is the better choice. Reproduce with
+`harness compare --tasks rag_fusion_qa rag_single_qa --models <model>`.
+
 ## Cost and safety
 
 - A hard spend cap per run (default $5). Parallel calls reserve their worst-case cost
@@ -115,7 +149,7 @@ What stood out:
 
 ## CI
 
-`ci.yml` runs on every push: lint, 241 offline tests (93% coverage), and smoke runs on
+`ci.yml` runs on every push: lint, 255 offline tests (94% coverage), and smoke runs on
 the mock provider. `eval-gate.yml` runs nightly against gpt-6-luna and gates each task
 against its committed baseline. It skips if the `OPENAI_API_KEY` secret isn't set.
 

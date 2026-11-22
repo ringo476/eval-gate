@@ -31,6 +31,12 @@ It evaluates **two** target apps through the same core machinery:
 - **`rag_fusion_qa`** — a fixed pipeline (expand query → retrieve →
   fuse → synthesize answer) wrapping a vendored third-party project,
   [Raudaschl/rag-fusion](https://github.com/Raudaschl/rag-fusion).
+  Variants on the same golden set, each changing one thing, for
+  `compare --tasks`: `rag_single_qa` (one search, no expansion),
+  `rag_fusion_plain_qa` (fusion search, expanded queries left out of the
+  answer prompt) and `rag_fusion_guarded_qa` (plus a prompt-injection
+  guard). `rag_fusion_hard_qa` / `rag_single_hard_qa` run fusion and
+  single search on a separate set of questions worded unlike the documents.
 - **`tool_agent_qa`** — a genuine agent (built for this project) with a
   calculator and a knowledge-base lookup tool, where the model itself
   decides which tool to call, in what order, and when to stop.
