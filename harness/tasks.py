@@ -23,16 +23,12 @@ class TaskSpec:
     dataset_task: str | None = None
 
 
-def _rag_fusion_adapter():
-    from harness.adapters.rag_fusion import RagFusionAdapter
-    from harness.corpus import CORPUS
-    return RagFusionAdapter(CORPUS)
-
-
-def _rag_single_adapter():
-    from harness.adapters.rag_fusion import RagFusionAdapter
-    from harness.corpus import CORPUS
-    return RagFusionAdapter(CORPUS, retrieval="single")
+def _rag_adapter(task_name: str, **variant):
+    def factory():
+        from harness.adapters.rag_fusion import RagFusionAdapter
+        from harness.corpus import CORPUS
+        return RagFusionAdapter(CORPUS, task_name=task_name, **variant)
+    return factory
 
 
 def _rag_fusion_scorers(judge_provider):
@@ -71,19 +67,48 @@ def _tool_agent_scorers(judge_provider):
     ]
 
 
+RAG_GOLDEN = "golden/rag_fusion_qa.jsonl"
+RAG_HARD_GOLDEN = "golden/rag_hard_qa.jsonl"
+
 TASKS: dict[str, TaskSpec] = {
-    "rag_fusion_qa": TaskSpec(
-        dataset_path="golden/rag_fusion_qa.jsonl",
-        adapter_factory=_rag_fusion_adapter,
+    # The RAG variants below share one golden set, so `compare --tasks` can
+    # pair them question by question. Neighbours differ in one thing each.
+    "rag_fusion_qa": TaskSpec(  # rag-fusion as published
+        dataset_path=RAG_GOLDEN,
+        adapter_factory=_rag_adapter("rag_fusion_qa"),
         scorers_factory=_rag_fusion_scorers,
     ),
-    # Control for rag-fusion's claim: same questions, same pipeline, one
-    # search with the original query instead of expansion + fusion.
-    "rag_single_qa": TaskSpec(
-        dataset_path="golden/rag_fusion_qa.jsonl",
-        adapter_factory=_rag_single_adapter,
+    "rag_single_qa": TaskSpec(  # control: one search with the original query
+        dataset_path=RAG_GOLDEN,
+        adapter_factory=_rag_adapter("rag_single_qa", retrieval="single"),
         scorers_factory=_rag_fusion_scorers,
         dataset_task="rag_fusion_qa",
+    ),
+    "rag_fusion_plain_qa": TaskSpec(  # fusion search, expanded queries kept out of the answer prompt
+        dataset_path=RAG_GOLDEN,
+        adapter_factory=_rag_adapter("rag_fusion_plain_qa", show_queries=False),
+        scorers_factory=_rag_fusion_scorers,
+        dataset_task="rag_fusion_qa",
+    ),
+    "rag_fusion_guarded_qa": TaskSpec(  # ...plus a prompt-injection guard
+        dataset_path=RAG_GOLDEN,
+        adapter_factory=_rag_adapter("rag_fusion_guarded_qa", show_queries=False, guard=True),
+        scorers_factory=_rag_fusion_scorers,
+        dataset_task="rag_fusion_qa",
+    ),
+    # Questions worded unlike the documents they need, the case query
+    # expansion is meant for. Separate golden set, so these runs don't mix
+    # into the main RAG task's history, baselines or gate.
+    "rag_fusion_hard_qa": TaskSpec(
+        dataset_path=RAG_HARD_GOLDEN,
+        adapter_factory=_rag_adapter("rag_fusion_hard_qa"),
+        scorers_factory=_rag_fusion_scorers,
+    ),
+    "rag_single_hard_qa": TaskSpec(
+        dataset_path=RAG_HARD_GOLDEN,
+        adapter_factory=_rag_adapter("rag_single_hard_qa", retrieval="single"),
+        scorers_factory=_rag_fusion_scorers,
+        dataset_task="rag_fusion_hard_qa",
     ),
     "tool_agent_qa": TaskSpec(
         dataset_path="golden/tool_agent_qa.jsonl",
